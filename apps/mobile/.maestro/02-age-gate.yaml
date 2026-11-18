@@ -1,0 +1,8 @@
+appId: local.personal.museclone
+---
+- launchApp: { clearState: true }
+- tapOn: "Let's start"
+- tapOn: "Date of birth (YYYY-MM-DD)"
+- inputText: "2015-01-01"
+- tapOn: "Continue"
+- assertVisible: "Sorry, you must be at least 18 to use this app."

@@ -1,0 +1,109 @@
+# One-command local setup:  MODEL_API_KEY=... docker compose up --build
+# Everything runs locally (EU / your machine). Secrets are generated on first start into the "secrets" volume.
+name: muse
+
+x-node: &node
+  build: { context: ., dockerfile: infra/node.Dockerfile, target: service }
+  env_file: [{ path: .env, required: false }]
+  volumes: [secrets:/secrets:ro]
+  restart: unless-stopped
+  depends_on:
+    keys: { condition: service_completed_successfully }
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  keys:
+    build: { context: ., dockerfile: infra/node.Dockerfile, target: base }
+    user: root
+    volumes: [secrets:/secrets]
+    command: ["sh", "-c", "[ -s /secrets/keys.env ] || node scripts/gen-keys.mjs > /secrets/keys.env; chmod 644 /secrets/keys.env"]
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: muse
+      POSTGRES_DB: muse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-muse-local-dev}
+      SENTINEL_DB_PASSWORD: ${SENTINEL_DB_PASSWORD:-sentinel-local-dev}
+    volumes: [pgdata:/var/lib/postgresql/data, ./infra/postgres:/docker-entrypoint-initdb.d:ro]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U muse"], interval: 3s, retries: 30 }
+    networks: [backend]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # durable job queue: background tasks survive restarts
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 30 }
+    networks: [backend]
+
+  sentinel:
+    <<: *node
+    command: ["pnpm", "--filter", "@muse/sentinel", "start"]
+    environment:
+      SENTINEL_DATABASE_URL: postgres://muse_sentinel:${SENTINEL_DB_PASSWORD:-sentinel-local-dev}@postgres:5432/muse
+      DATABASE_URL: postgres://muse_sentinel:${SENTINEL_DB_PASSWORD:-sentinel-local-dev}@postgres:5432/muse
+      # Sentinel uses its own model credentials when provided.
+      SENTINEL_MODEL_API_KEY: ${SENTINEL_MODEL_API_KEY:-${MODEL_API_KEY:-}}
+      MODEL_API_KEY: ""
+    depends_on:
+      keys: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      api: { condition: service_started }   # api applies migrations (incl. grants for the sentinel role)
+    networks: [backend, sandbox, egress]
+
+  api:
+    <<: *node
+    command: ["pnpm", "--filter", "@muse/api", "start"]
+    environment:
+      DATABASE_URL: postgres://muse:${POSTGRES_PASSWORD:-muse-local-dev}@postgres:5432/muse
+      REDIS_URL: redis://redis:6379
+      SENTINEL_URL: http://sentinel:4100
+      DATA_REGION: ${DATA_REGION:-eu}
+    ports: ["4000:4000"]
+    networks: [backend, sandbox, egress]
+
+  agent:
+    <<: *node
+    command: ["pnpm", "--filter", "@muse/agent", "start"]
+    user: root   # needs the Docker socket to start per-user sandbox containers (see README: security notes)
+    environment:
+      DATABASE_URL: postgres://muse:${POSTGRES_PASSWORD:-muse-local-dev}@postgres:5432/muse
+      REDIS_URL: redis://redis:6379
+      SENTINEL_URL: http://sentinel:4100
+      EXECUTOR_URL: http://api:4000
+      SANDBOX_DRIVER: docker
+      SANDBOX_IMAGE: muse-sandbox:latest
+      SANDBOX_NETWORK: muse-sandbox
+      EGRESS_PROXY_URL: http://sentinel:8899
+    volumes: [secrets:/secrets:ro, /var/run/docker.sock:/var/run/docker.sock]
+    depends_on:
+      keys: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      sandbox-image: { condition: service_completed_successfully }
+    networks: [backend, sandbox, egress]
+
+  web:
+    build: { context: ., dockerfile: infra/node.Dockerfile, target: web, args: { NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:4000}" } }
+    ports: ["3000:3000"]
+    restart: unless-stopped
+    networks: [egress]
+
+  # Builds the per-user sandbox browser image, then exits.
+  sandbox-image:
+    build: { context: ., dockerfile: services/sandbox/Dockerfile }
+    image: muse-sandbox:latest
+    entrypoint: ["true"]
+    network_mode: none
+
+networks:
+  backend: {}
+  egress: {}
+  # Sandbox browsers live here: no route to the internet except the Sentinel egress proxy.
+  sandbox: { name: muse-sandbox, internal: true }
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  secrets: {}

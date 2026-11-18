@@ -1,0 +1,36 @@
+{
+  "name": "@muse/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.4.3",
+    "@fastify/rate-limit": "11.2.2",
+    "@fastify/websocket": "11.3.7",
+    "@muse/core": "workspace:*",
+    "@muse/db": "workspace:*",
+    "@muse/runtime": "workspace:*",
+    "@muse/security": "workspace:*",
+    "expo-server-sdk": "8.0.0",
+    "fastify": "5.12.8",
+    "https-proxy-agent": "9.1.0",
+    "ioredis": "5.11.1",
+    "jose": "6.2.17",
+    "libsodium-wrappers": "0.8.4",
+    "web-push": "4.0.0",
+    "ws": "8.23.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "0.8.2",
+    "@types/web-push": "3.6.4",
+    "@types/ws": "8.18.2"
+  }
+}

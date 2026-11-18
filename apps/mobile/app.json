@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Muse Clone (personal)",
+    "slug": "muse-clone-personal",
+    "scheme": "museclone",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "ios": { "bundleIdentifier": "local.personal.museclone", "supportsTablet": true, "infoPlist": { "NSMicrophoneUsageDescription": "Talk to your agent with your voice." } },
+    "android": { "package": "local.personal.museclone", "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"] },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      ["expo-notifications", { "color": "#6B4E31" }],
+      ["expo-audio", { "microphonePermission": "Talk to your agent with your voice." }]
+    ],
+    "extra": { "apiUrl": "http://10.0.2.2:4000" },
+    "experiments": { "typedRoutes": false }
+  }
+}
