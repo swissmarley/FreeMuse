@@ -97,6 +97,26 @@ describe('vad', () => {
     run(s, 240, 2000, 0.05);
     expect(feed(v, s)).toEqual([]);
   });
+  it("barge-in ignores the assistant's own voice leaking into the mic", () => {
+    const v = new Vad(BARGE_IN_VAD);
+    const s: [number, number][] = [];
+    // Echo of the assistant: syllables up to 0.62 with dips, for 8 s, starting right away.
+    run(s, 0, 8000, (t) => [0.3, 0.55, 0.62, 0.5, 0.2, 0.58][Math.floor(t / 80) % 6]!);
+    expect(feed(v, s)).toEqual([]);
+  });
+  it('barge-in still hears the caller talking over the assistant', () => {
+    const v = new Vad(BARGE_IN_VAD);
+    const s: [number, number][] = [];
+    run(s, 0, 3000, (t) => [0.3, 0.55, 0.62, 0.5, 0.2, 0.58][Math.floor(t / 80) % 6]!);
+    run(s, 3000, 4500, (t) => (Math.floor(t / 80) % 4 ? 0.82 : 0.74)); // the caller, clearly louder
+    expect(feed(v, s)[0]).toBe('speech-start');
+  });
+  it('barge-in waits a moment after the assistant starts', () => {
+    const v = new Vad(BARGE_IN_VAD);
+    const s: [number, number][] = [];
+    run(s, 0, 800, 0.9);
+    expect(feed(v, s)).toEqual([]);
+  });
   it('barge-in needs a louder voice', () => {
     const v = new Vad(BARGE_IN_VAD);
     const s: [number, number][] = [];

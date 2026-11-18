@@ -244,11 +244,21 @@ export interface VadOptions {
   minSpeechMs: number;
   /** A turn never lasts longer than this (ms), whatever the mic hears. */
   maxSpeechMs: number;
+  /**
+   * Echo guard (for barge-in while the assistant talks): remember the loudest recent level that was not a turn
+   * (the assistant's own voice leaking into the mic) and require speech to be `margin` louder than that. The memory
+   * fades by this much per second. Off when undefined.
+   */
+  holdDecayPerS?: number;
+  /** After a reset, no turn can start for this long (ms), while the echo guard learns how loud the echo is. */
+  graceMs?: number;
 }
 
 export const DEFAULT_VAD: VadOptions = { minLevel: 0.3, margin: 0.2, startMs: 150, endMs: 800, minSpeechMs: 300, maxSpeechMs: 30_000 };
 /** While the assistant is talking, a barge-in needs to be clearly louder (its own voice may leak into the mic). */
-export const BARGE_IN_VAD: VadOptions = { minLevel: 0.45, margin: 0.3, startMs: 280, endMs: 800, minSpeechMs: 300, maxSpeechMs: 30_000 };
+export const BARGE_IN_VAD: VadOptions = {
+  minLevel: 0.55, margin: 0.15, startMs: 400, endMs: 800, minSpeechMs: 300, maxSpeechMs: 30_000, holdDecayPerS: 0.08, graceMs: 900,
+};
 
 export type VadEvent = 'speech-start' | 'speech-end' | 'blip' | null;
 
@@ -270,16 +280,22 @@ export class Vad {
   private lastVoice = 0;
   private speechStart = 0;
   private lastT: number | null = null;
+  /** Loudest recent non-turn level (echo guard). */
+  hold = 0;
+  private armedAt: number | null = null;
   constructor(public opts: VadOptions = DEFAULT_VAD) {}
 
   threshold(): number {
-    return Math.max(this.opts.minLevel, this.floor + this.opts.margin);
+    const base = this.opts.holdDecayPerS === undefined ? this.floor : Math.max(this.floor, this.hold);
+    return Math.max(this.opts.minLevel, base + this.opts.margin);
   }
 
   /** Forget the current turn (the noise floor is kept). */
   reset() {
     this.speaking = false;
     this.aboveSince = null;
+    this.hold = 0;
+    this.armedAt = null;
   }
 
   /** Learn the background without detecting anything (e.g. while the mic is muted for the call). */
@@ -292,8 +308,15 @@ export class Vad {
   }
 
   push(level: number, now: number): VadEvent {
+    this.armedAt ??= now;
+    const dt = this.lastT === null ? 0.08 : Math.min(1, Math.max(0, (now - this.lastT) / 1000));
     const loud = level >= this.threshold();
     this.observe(level, now);
+    const grace = now - this.armedAt < (this.opts.graceMs ?? 0);
+    if (this.opts.holdDecayPerS !== undefined && !this.speaking && (!loud || grace)) {
+      this.hold = Math.max(level, this.hold - this.opts.holdDecayPerS * dt);
+    }
+    if (grace) return null;
     if (this.speaking && now - this.speechStart >= this.opts.maxSpeechMs) {
       this.reset();
       return 'speech-end';
