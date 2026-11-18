@@ -20,7 +20,7 @@ export const PAGES: Record<string, string> = {
     </body></html>`,
 };
 
-export async function startFixtures(): Promise<{ url: string; close: () => void }> {
+export async function startFixtures(port = 0): Promise<{ url: string; close: () => void }> {
   const posts: string[] = [];
   const server = http.createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0]!;
@@ -29,6 +29,6 @@ export async function startFixtures(): Promise<{ url: string; close: () => void 
     res.writeHead(body ? 200 : 404, { 'content-type': 'text/html' });
     res.end(body ?? 'not found');
   });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close: () => server.close() };
 }

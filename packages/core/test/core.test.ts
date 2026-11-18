@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ageOn, blinkOpenness, buildAvatar, DEFAULT_AVATAR, nextBlinkDelay, personaPrompt, resolveAvatarState, strings, SignupInput } from '../src/index.js';
+import { ageOn, blinkOpenness, buildAvatar, DEFAULT_AVATAR, nextBlinkDelay, personaPrompt, resolveAvatarState, strings, SignupInput } from '../src/index';
 
 describe('age gate', () => {
   it('computes age with birthday boundary', () => {

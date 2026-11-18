@@ -1,4 +1,4 @@
-import type { en } from './en.js';
+import type { en } from './en';
 export const it: Partial<typeof en> = {
   tasks: 'Attività', approvals: 'Approvazioni', activity: 'Cronologia', memory: 'Memoria', settings: 'Impostazioni',
   composerPlaceholder: 'Scrivi a {name}…', send: 'Invia', approve: 'Approva', reject: 'Rifiuta', edit: 'Modifica',

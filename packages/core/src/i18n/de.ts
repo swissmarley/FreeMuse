@@ -1,4 +1,4 @@
-import type { en } from './en.js';
+import type { en } from './en';
 export const de: Partial<typeof en> = {
   chat: 'Chat', tasks: 'Aufgaben', approvals: 'Freigaben', activity: 'Aktivität', memory: 'Erinnerungen',
   connections: 'Verbindungen', settings: 'Einstellungen', composerPlaceholder: 'Nachricht an {name}…', send: 'Senden',

@@ -1,0 +1,10 @@
+{
+  "name": "Muse Clone (personal)",
+  "short_name": "Muse Clone",
+  "description": "Your personal agent that gets things done, with you in control.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFBF4",
+  "theme_color": "#FBF3E6",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

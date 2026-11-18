@@ -13,3 +13,4 @@ playwright-report/
 apps/mobile/android/
 apps/mobile/ios/
 *.tsbuildinfo
+.next-e2e/

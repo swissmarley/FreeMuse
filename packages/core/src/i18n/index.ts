@@ -1,8 +1,8 @@
-import { en } from './en.js';
-import { de } from './de.js';
-import { fr } from './fr.js';
-import { it } from './it.js';
-import { es } from './es.js';
+import { en } from './en';
+import { de } from './de';
+import { fr } from './fr';
+import { it } from './it';
+import { es } from './es';
 
 export type Strings = typeof en;
 export const LANGUAGES = { en: 'English', de: 'Deutsch', fr: 'Français', it: 'Italiano', es: 'Español' } as const;

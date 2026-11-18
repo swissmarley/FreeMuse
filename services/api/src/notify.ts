@@ -1,6 +1,6 @@
 /** Notifications: stored in-app, pushed live over SSE, and delivered via Web Push (VAPID) and Expo push. */
 import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
-import webpush from 'web-push';
+import * as webpush from 'web-push';
 import { addNotification, type Db } from '@muse/db';
 import type { Bus } from '@muse/runtime';
 import { log } from '@muse/runtime';

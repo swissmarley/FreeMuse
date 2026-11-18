@@ -3,8 +3,8 @@
  * a smooth pale face, glossy dot eyes, blush and a small smile. It renders identically on web
  * (DOM SVG) and mobile (react-native-svg): renderers just map these primitives to elements.
  */
-import type { AvatarSettings } from './config.js';
-import { type AvatarState, blinkOpenness } from './state.js';
+import type { AvatarSettings } from './config';
+import { type AvatarState, blinkOpenness } from './state';
 
 export const VIEWBOX = { w: 200, h: 224 } as const;
 

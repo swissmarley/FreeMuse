@@ -1,4 +1,4 @@
-import type { en } from './en.js';
+import type { en } from './en';
 export const fr: Partial<typeof en> = {
   tasks: 'Tâches', approvals: 'Validations', activity: 'Activité', memory: 'Mémoire', settings: 'Réglages',
   composerPlaceholder: 'Message à {name}…', send: 'Envoyer', approve: 'Valider', reject: 'Refuser', edit: 'Modifier',

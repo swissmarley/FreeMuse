@@ -4,8 +4,8 @@
  */
 import type {
   Approval, AuditEvent, ChatMessage, Connection, ConnectorInfo, Memory, StreamEvent, Task, UserSettings,
-} from './schemas.js';
-import type { AvatarSettings } from './avatar/config.js';
+} from './schemas';
+import type { AvatarSettings } from './avatar/config';
 
 export interface ClientOptions {
   baseUrl: string;

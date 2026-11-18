@@ -1,3 +1,3 @@
-export * from './config.js';
-export * from './state.js';
-export * from './geometry.js';
+export * from './config';
+export * from './state';
+export * from './geometry';

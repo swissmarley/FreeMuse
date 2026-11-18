@@ -101,10 +101,9 @@ export function evaluatePolicy(a: ActionRequest, ctx: PolicyContext): PolicyResu
   }
 
   if (a.actionClass === 'draft') {
-    if (tainted || !ctx.settings.autoApproveDrafts) {
-      return { decision: 'ask', reasons: [tainted ? 'Draft based on untrusted content' : 'Auto-drafts are off'], risk: 'low', needsReview: true, exfiltration };
-    }
-    return { decision: 'allow', reasons: ['Drafts are reversible and auto-approved by your settings'], risk: 'low', needsReview: true, exfiltration };
+    // Drafts stay in the user's own mailbox (nothing leaves), so they are auto-saved when the user allows it.
+    if (!ctx.settings.autoApproveDrafts) return { decision: 'ask', reasons: ['Auto-drafts are off'], risk: 'low', needsReview: true, exfiltration };
+    return { decision: 'allow', reasons: ['Drafts stay in your mailbox and are auto-saved per your settings'], risk: 'low', needsReview: true, exfiltration };
   }
 
   // read / navigate

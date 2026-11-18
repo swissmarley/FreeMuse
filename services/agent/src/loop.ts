@@ -27,7 +27,8 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
   const byName = new Map(o.tools.map((t) => [t.def.name, t]));
   const defs: ToolDef[] = [...o.tools.map((t) => t.def), ...(o.builtins ?? [])];
   const newItems: Item[] = [];
-  const texts: string[] = [];
+  const finals: string[] = [];
+  let lastCommentary = '';
   const citations: { url: string; title?: string }[] = [];
   const maxSteps = o.maxSteps ?? 12;
   let steps = 0;
@@ -47,12 +48,13 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
     );
     newItems.push(...res.output);
     citations.push(...res.citations);
-    const visible = res.output
-      .filter((i): i is Extract<Item, { type: 'message' }> => i.type === 'message')
-      .map((m) => (typeof m.content === 'string' ? m.content : m.content.map((c) => ('text' in c ? c.text : '')).join('')))
-      .join('\n')
-      .trim();
-    if (visible) { texts.push(visible); lastWasText = true; }
+    const msgText = (m: Extract<Item, { type: 'message' }>) => (typeof m.content === 'string' ? m.content : m.content.map((c) => ('text' in c ? c.text : '')).join(''));
+    const msgs = res.output.filter((i): i is Extract<Item, { type: 'message' }> => i.type === 'message');
+    const final = msgs.filter((m) => m.phase !== 'commentary').map(msgText).join('\n').trim();
+    const commentary = msgs.filter((m) => m.phase === 'commentary').map(msgText).join('\n').trim();
+    if (final) finals.push(final);
+    if (commentary) lastCommentary = commentary;
+    if (final || commentary) lastWasText = true;
     if (!res.toolCalls.length) break;
 
     // Run every requested tool concurrently (parallel tool calls), keep outputs in call order.
@@ -79,7 +81,8 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
     for (const { call, out } of outputs) newItems.push({ type: 'function_call_output', call_id: call.callId, output: out });
   }
   const hitLimit = steps >= maxSteps;
-  return { newItems, text: texts.join('\n\n').trim(), citations, steps, hitLimit };
+  // The saved reply is the final answer; interim commentary was only streamed live.
+  return { newItems, text: (finals.join('\n\n') || lastCommentary).trim(), citations, steps, hitLimit };
 }
 
 function summarize(out: string): string {
