@@ -108,3 +108,24 @@ Age gate (18+; only birth year and a verification timestamp are stored), AI disc
 opt-out (switches to Standard-mode model IDs; Contributor-mode IDs are never used), data export (JSON), delete
 everything, EU-region config (`DATA_REGION=eu`, compose runs everything locally), data minimisation, and
 PRIVACY.md.
+
+## 6. Status (all slices built)
+| Slice | State | Verified by |
+|---|---|---|
+| a. chat + streaming + avatar | done | web e2e, live run against muse-spark-1.3 |
+| b. tool loop + audit log | done | full-stack tests (parallel tool calls + parallel subagents), hash-chain tests |
+| c. Sentinel + approvals | done | policy/integration tests, executor signature tests, live run (approve → sent) |
+| d. sandbox browser agent | done | Chromium tests (grants, password fields, SSRF via egress proxy) |
+| e. connectors + vault + payments | done | API tests (scopes, revoke, encrypted vault, test-mode payments) |
+| f. background jobs + push | done | durable delayed jobs survive client close (e2e waits 70 s with no client), Web Push + Expo push wiring |
+| g. memory + proactive | done | extraction / forget tests; reflection + proactive jobs (scheduled) |
+| h. voice | done | realtime STT proxy + file STT (Meta), on-device TTS with lip-sync |
+| i. customisation + mobile | done | avatar customiser (web + mobile), Expo app type-checks and bundles for Android |
+
+Deviations and what could not be verified here:
+- Avatar is rendered as an original SVG vector character (shared model for web and react-native-svg), not Rive/Lottie:
+  `.riv`/Lottie files need authoring tools. A user-supplied image can be swapped in via `AVATAR_ASSET`.
+- Mobile ran only as a type-check, unit tests and an Android bundle export. Maestro flows are included but not run (no emulator here).
+- `docker compose build` could not complete in this build environment (its Docker builds have no DNS for Debian
+  mirrors). Services were verified by running them directly against Dockerised Postgres + Redis.
+- Real Google OAuth needs your own OAuth client. It is implemented, but here it was tested only through unit paths and the Demo connectors.

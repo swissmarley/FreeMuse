@@ -56,7 +56,7 @@ function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
         </div>
       ) : (
         <dl className="kv">
-          {Object.entries(a.preview).map(([k, v]) => (<Fragment key={k}><dt>{k}</dt><dd>{show(v)}</dd></Fragment>))}
+          {Object.entries(a.preview).filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && v.length === 0)).map(([k, v]) => (<Fragment key={k}><dt>{k}</dt><dd>{show(v)}</dd></Fragment>))}
         </dl>
       )}
       {a.risk.reasons.length > 0 && (

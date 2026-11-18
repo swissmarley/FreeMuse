@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/.next-e2e
+**/.expo
+**/.expo-export
+**/test-results
+**/playwright-report
+.git
+.env
+.env.*
+apps/mobile/android
+apps/mobile/ios
