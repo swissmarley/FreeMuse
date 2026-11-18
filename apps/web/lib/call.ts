@@ -7,7 +7,7 @@
  *  - when you pause, the utterance is transcribed (with a language hint) and handed to the call,
  *  - while the assistant speaks, talking louder than its voice interrupts it ("barge-in").
  */
-import { BARGE_IN_VAD, DEFAULT_VAD, Vad } from '@muse/core/voice';
+import { BARGE_IN_VAD, DEFAULT_VAD, rmsToLevel, Vad } from '@muse/core/voice';
 import { api, API_URL } from './api';
 
 export type MicMode = 'listen' | 'barge' | 'off';
@@ -23,7 +23,7 @@ export interface CallMicEvents {
 
 const FRAME_MS = 80; // the PCM worklet posts 80 ms frames (1920 samples at 24 kHz)
 const PREROLL_FRAMES = 6;
-const MAX_UTTERANCE_FRAMES = Math.round(45_000 / FRAME_MS);
+const MAX_UTTERANCE_FRAMES = Math.round(DEFAULT_VAD.maxSpeechMs / FRAME_MS) + PREROLL_FRAMES;
 
 /** 24 kHz mono PCM16 frames → WAV file bytes. */
 export function pcmToWav(frames: ArrayBuffer[], sampleRate = 24000): Uint8Array {
@@ -67,7 +67,7 @@ export class CallMic {
     await this.ctx.audioWorklet.addModule('/pcm-worklet.js');
     this.src = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, 'pcm-worklet');
-    this.node.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; level: number }>) => this.frame(e.data.pcm, e.data.level);
+    this.node.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => this.frame(e.data.pcm, rmsToLevel(e.data.rms));
     this.src.connect(this.node);
   }
 
@@ -93,7 +93,11 @@ export class CallMic {
     this.on.level(this.mode === 'off' ? 0 : level);
     this.preroll.push(pcm);
     if (this.preroll.length > PREROLL_FRAMES) this.preroll.shift();
-    if (this.mode === 'off') return;
+    if (this.mode === 'off') {
+      // Keep learning the room's background noise while muted / thinking, so the next turn starts calibrated.
+      this.vad.observe(level, performance.now());
+      return;
+    }
     if (this.utter) {
       this.utter.push(pcm);
       if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(pcm);
@@ -102,7 +106,11 @@ export class CallMic {
     const ev = this.vad.push(level, performance.now());
     if (ev === 'speech-start') {
       const barge = this.mode === 'barge';
-      if (barge) this.setMode('listen');
+      if (barge) {
+        // The caller took over: keep the turn the VAD just started (setMode would reset it and start a second one).
+        this.mode = 'listen';
+        this.vad.opts = DEFAULT_VAD;
+      }
       this.beginUtterance();
       this.on.speechStart(barge);
     } else if (ev === 'speech-end') void this.finish();

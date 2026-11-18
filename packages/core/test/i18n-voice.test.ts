@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fmt, LANGUAGES, strings } from '../src/i18n/index';
 import { en } from '../src/i18n/en';
-import { BARGE_IN_VAD, chooseTtsEngine, DEFAULT_VAD, Vad } from '../src/voice';
+import { BARGE_IN_VAD, chooseTtsEngine, dbToLevel, DEFAULT_VAD, rmsToLevel, Vad } from '../src/voice';
 import { DEFAULT_SETTINGS, SignupInput } from '../src/schemas';
 
 describe('i18n', () => {
@@ -49,24 +49,59 @@ describe('tts engine choice', () => {
 
 describe('vad', () => {
   const feed = (v: Vad, samples: [number, number][]) => samples.map(([t, l]) => v.push(l, t)).filter(Boolean);
+  const run = (s: [number, number][], from: number, to: number, level: number | ((t: number) => number)) => {
+    for (let t = from; t < to; t += 80) s.push([t, typeof level === 'number' ? level : level(t)]);
+  };
+  it('maps dB and RMS to the level scale', () => {
+    expect(dbToLevel(-55)).toBe(0);
+    expect(dbToLevel(-5)).toBe(1);
+    expect(dbToLevel(undefined)).toBe(0);
+    expect(rmsToLevel(0)).toBe(0);
+    expect(rmsToLevel(0.1)).toBeCloseTo(0.7, 5);
+  });
   it('starts after sustained speech and ends after a pause', () => {
     const v = new Vad(DEFAULT_VAD);
     const s: [number, number][] = [];
-    for (let t = 0; t < 1000; t += 40) s.push([t, 0.01]);
-    for (let t = 1000; t < 2000; t += 40) s.push([t, 0.3]);
-    for (let t = 2000; t < 3200; t += 40) s.push([t, 0.01]);
+    run(s, 0, 1000, 0.05);
+    run(s, 1000, 2000, 0.7);
+    run(s, 2000, 3200, 0.05);
     expect(feed(v, s)).toEqual(['speech-start', 'speech-end']);
+  });
+  it('ends the turn when the room is noisy (background above the starting threshold)', () => {
+    const v = new Vad(DEFAULT_VAD);
+    const s: [number, number][] = [];
+    run(s, 0, 2000, (t) => (Math.floor(t / 160) % 2 ? 0.75 : 0.6)); // talking
+    run(s, 2000, 9000, (t) => (Math.floor(t / 80) % 3 ? 0.42 : 0.5)); // stopped talking, noisy room
+    const ev = feed(v, s);
+    expect(ev).toEqual(['speech-start', 'speech-end']);
+  });
+  it('a pause ends the turn even with a little noise left', () => {
+    const v = new Vad(DEFAULT_VAD);
+    const s: [number, number][] = [];
+    run(s, 0, 1500, 0.1);
+    run(s, 1500, 4000, (t) => (Math.floor(t / 240) % 4 ? 0.7 : 0.25)); // words with tiny gaps
+    run(s, 4000, 5200, (t) => (t % 400 === 0 ? 0.33 : 0.15)); // pause with the odd click
+    const ev = feed(v, s);
+    expect(ev).toEqual(['speech-start', 'speech-end']);
+  });
+  it('never lets a turn run forever', () => {
+    const v = new Vad({ ...DEFAULT_VAD, maxSpeechMs: 5000 });
+    const s: [number, number][] = [];
+    run(s, 0, 500, 0.05);
+    run(s, 500, 8000, (t) => 0.9 + (Math.floor(t / 80) % 2) * 0.05);
+    expect(feed(v, s)[1]).toBe('speech-end');
   });
   it('ignores clicks and short blips', () => {
     const v = new Vad(DEFAULT_VAD);
-    const s: [number, number][] = [[0, 0.01], [40, 0.5], [80, 0.01], [120, 0.01]];
-    for (let t = 160; t < 2000; t += 40) s.push([t, 0.01]);
+    const s: [number, number][] = [[0, 0.05], [80, 0.9], [160, 0.05]];
+    run(s, 240, 2000, 0.05);
     expect(feed(v, s)).toEqual([]);
   });
   it('barge-in needs a louder voice', () => {
     const v = new Vad(BARGE_IN_VAD);
     const s: [number, number][] = [];
-    for (let t = 0; t < 1000; t += 40) s.push([t, 0.08]);
+    run(s, 0, 1000, 0.05);
+    run(s, 1000, 3000, 0.38); // the assistant's own voice leaking in
     expect(feed(v, s)).toEqual([]);
   });
 });

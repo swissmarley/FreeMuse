@@ -218,52 +218,86 @@ export function chooseTtsEngine(provider: string, lang: string, opts: { elevenla
 // Voice-call turn taking (voice activity detection), shared by web and mobile
 // ---------------------------------------------------------------------------------------------------------------
 
+/**
+ * Map a loudness in dBFS to the 0..1 level scale the VAD and the avatar use (roughly -55 dB → 0, -5 dB → 1).
+ * Both the web mic (RMS of each frame) and the phone recorder (metering) report on this scale.
+ */
+export function dbToLevel(db: number | undefined): number {
+  return typeof db === 'number' && Number.isFinite(db) ? Math.max(0, Math.min(1, (db + 55) / 50)) : 0;
+}
+
+/** RMS amplitude (0..1) → level. */
+export function rmsToLevel(rms: number): number {
+  return rms > 0 ? dbToLevel(20 * Math.log10(rms)) : 0;
+}
+
 export interface VadOptions {
-  /** Minimum absolute level (0..1) that counts as speech. */
+  /** Minimum absolute level (0..1, dB-mapped) that counts as speech. */
   minLevel: number;
-  /** Speech must be this many times louder than the background noise floor. */
-  ratio: number;
+  /** Speech must be this much above the background noise floor (on the 0..1 scale; 0.1 ≈ 5 dB). */
+  margin: number;
   /** How long speech must last before it counts (ms). */
   startMs: number;
   /** Silence after speech that ends the turn (ms). */
   endMs: number;
   /** Ignore very short blips (ms of speech in total). */
   minSpeechMs: number;
+  /** A turn never lasts longer than this (ms), whatever the mic hears. */
+  maxSpeechMs: number;
 }
 
-export const DEFAULT_VAD: VadOptions = { minLevel: 0.045, ratio: 3, startMs: 120, endMs: 850, minSpeechMs: 300 };
+export const DEFAULT_VAD: VadOptions = { minLevel: 0.3, margin: 0.2, startMs: 150, endMs: 800, minSpeechMs: 300, maxSpeechMs: 30_000 };
 /** While the assistant is talking, a barge-in needs to be clearly louder (its own voice may leak into the mic). */
-export const BARGE_IN_VAD: VadOptions = { minLevel: 0.12, ratio: 5, startMs: 280, endMs: 850, minSpeechMs: 300 };
+export const BARGE_IN_VAD: VadOptions = { minLevel: 0.45, margin: 0.3, startMs: 280, endMs: 800, minSpeechMs: 300, maxSpeechMs: 30_000 };
 
 export type VadEvent = 'speech-start' | 'speech-end' | 'blip' | null;
 
+/** How fast the noise floor follows a quieter background (per second, as a fraction of the gap). */
+const FLOOR_FALL_PER_S = 6;
+/** How fast it creeps up towards a louder background (level units per second). Always running, even mid-turn, so
+ *  a steady noise (fan, traffic, a raised mic gain) can never hold a turn open: it ends up under the floor. */
+const FLOOR_RISE_PER_S = 0.06;
+
 /**
- * A tiny, dependency-free voice activity detector driven by level samples (peak amplitude 0..1) with timestamps.
- * It adapts to background noise, needs speech to last a moment before it starts a turn, and ends the turn after a
- * short pause, like a person on the phone.
+ * A tiny, dependency-free voice activity detector driven by level samples (dB-mapped 0..1) with timestamps.
+ * It tracks the background noise all the time, needs speech to last a moment before it starts a turn, and ends the
+ * turn after a short pause, like a person on the phone.
  */
 export class Vad {
-  floor = 0.01;
+  floor = 0.15;
   speaking = false;
   private aboveSince: number | null = null;
   private lastVoice = 0;
   private speechStart = 0;
+  private lastT: number | null = null;
   constructor(public opts: VadOptions = DEFAULT_VAD) {}
 
   threshold(): number {
-    return Math.max(this.opts.minLevel, this.floor * this.opts.ratio);
+    return Math.max(this.opts.minLevel, this.floor + this.opts.margin);
   }
 
+  /** Forget the current turn (the noise floor is kept). */
   reset() {
     this.speaking = false;
     this.aboveSince = null;
   }
 
+  /** Learn the background without detecting anything (e.g. while the mic is muted for the call). */
+  observe(level: number, now: number) {
+    const dt = this.lastT === null ? 0.08 : Math.min(1, Math.max(0, (now - this.lastT) / 1000));
+    this.lastT = now;
+    if (level < this.floor) this.floor -= (this.floor - level) * Math.min(1, FLOOR_FALL_PER_S * dt);
+    else this.floor = Math.min(level, this.floor + FLOOR_RISE_PER_S * dt);
+    this.floor = Math.min(0.85, Math.max(0, this.floor));
+  }
+
   push(level: number, now: number): VadEvent {
     const loud = level >= this.threshold();
-    // Track the noise floor only when nobody is talking (slowly up, quickly down).
-    if (!loud && !this.speaking) this.floor = level > this.floor ? this.floor * 0.98 + level * 0.02 : this.floor * 0.9 + level * 0.1;
-    this.floor = Math.min(0.2, Math.max(0.002, this.floor));
+    this.observe(level, now);
+    if (this.speaking && now - this.speechStart >= this.opts.maxSpeechMs) {
+      this.reset();
+      return 'speech-end';
+    }
     if (loud) {
       this.lastVoice = now;
       if (!this.speaking) {
