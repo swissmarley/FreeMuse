@@ -1,0 +1,20 @@
+{
+  "name": "freemuse",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:e2e": "pnpm --filter @muse/web test:e2e",
+    "migrate": "pnpm --filter @muse/db migrate",
+    "gen:keys": "node scripts/gen-keys.mjs"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "tsx": "4.23.15",
+    "vitest": "5.1.0",
+    "@types/node": "26.6.6"
+  }
+}
