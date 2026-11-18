@@ -1,6 +1,6 @@
 {
-  "name": "Muse Clone (personal)",
-  "short_name": "Muse Clone",
+  "name": "Free Muse",
+  "short_name": "Free Muse",
   "description": "Your personal agent that gets things done, with you in control.",
   "start_url": "/",
   "display": "standalone",

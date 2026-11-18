@@ -15,7 +15,69 @@ export const GOOGLE_SCOPE_MAP: Record<string, Record<string, string[]>> = {
 
 interface Tokens { access_token: string; refresh_token?: string; expires_at: number; scope?: string }
 
-const redirectUri = (cfg: ApiConfig) => `${cfg.publicUrl}/v1/oauth/google/callback`;
+export const redirectUri = (cfg: ApiConfig) => `${cfg.publicUrl}/v1/oauth/google/callback`;
+
+/** Vault service name for the user's own Google OAuth client (entered in the in-app setup guide). */
+export const GOOGLE_APP_SERVICE = 'google_app';
+export interface GoogleApp { clientId: string; clientSecret: string; source: 'you' | 'server' }
+type AppCtx = Pick<ExecCtx, 'userId' | 'vault' | 'cfg'>;
+
+/** The Google OAuth client to use: the one this user saved in the app, else the server's GOOGLE_CLIENT_ID/SECRET. */
+export async function googleApp(ctx: AppCtx): Promise<GoogleApp | null> {
+  const id = await ctx.vault.findId(ctx.userId, 'oauth', GOOGLE_APP_SERVICE);
+  if (id) {
+    const it = await ctx.vault.get<{ clientId: string; clientSecret: string }>(ctx.userId, id).catch(() => null);
+    if (it?.secret.clientId && it.secret.clientSecret) return { clientId: it.secret.clientId, clientSecret: it.secret.clientSecret, source: 'you' };
+  }
+  if (ctx.cfg.googleClientId && ctx.cfg.googleClientSecret) return { clientId: ctx.cfg.googleClientId, clientSecret: ctx.cfg.googleClientSecret, source: 'server' };
+  return null;
+}
+
+async function requireApp(ctx: AppCtx): Promise<GoogleApp> {
+  const app = await googleApp(ctx);
+  if (!app) throw new ConnectorError('not_configured', 'Google is not set up yet. Open Connections and follow "Set up Google" (takes about 2 minutes).');
+  return app;
+}
+
+/** Consent URL for any set of Google API scopes (one screen, even for several services). */
+export async function googleAuthorizeUrl(ctx: AppCtx, googleScopeList: string[], state: string, challenge: string): Promise<string> {
+  const app = await requireApp(ctx);
+  const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  u.search = new URLSearchParams({
+    client_id: app.clientId, redirect_uri: redirectUri(ctx.cfg), response_type: 'code', access_type: 'offline', prompt: 'consent',
+    include_granted_scopes: 'false', scope: [...new Set(['openid', 'email', ...googleScopeList])].join(' '), state, code_challenge: challenge, code_challenge_method: 'S256',
+  }).toString();
+  return u.toString();
+}
+
+/** Exchange an authorization code; store the tokens in the vault under `service`. */
+export async function googleExchange(ctx: AppCtx, service: string, code: string, verifier: string): Promise<{ account: string; vaultId: string }> {
+  const app = await requireApp(ctx);
+  const j = await tokenRequest({ client_id: app.clientId, client_secret: app.clientSecret, code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: redirectUri(ctx.cfg) });
+  let account = 'Google account';
+  try { account = JSON.parse(Buffer.from(String(j.id_token).split('.')[1]!, 'base64url').toString()).email ?? account; } catch { /* keep default */ }
+  const vaultId = await ctx.vault.put(ctx.userId, 'oauth', service, account, { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + j.expires_in * 1000, scope: j.scope });
+  return { account, vaultId };
+}
+
+/**
+ * Check a client id/secret pair with Google without any user consent: a bogus code is rejected with
+ * "invalid_grant" when the client is valid and "invalid_client" when it isn't. Returns null if Google can't be reached.
+ */
+export async function verifyGoogleClient(cfg: ApiConfig, clientId: string, clientSecret: string): Promise<boolean | null> {
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code: 'freemuse-setup-check', grant_type: 'authorization_code', redirect_uri: redirectUri(cfg) }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.error === 'invalid_client' || j.error === 'unauthorized_client') return false;
+    return true;
+  } catch {
+    return null;
+  }
+}
 
 export function googleScopes(connector: string, scopes: string[]): string[] {
   const m = GOOGLE_SCOPE_MAP[connector] ?? {};
@@ -36,7 +98,8 @@ async function accessToken(ctx: ExecCtx, service: string): Promise<string> {
   const t = item.secret;
   if (t.expires_at > Date.now() + 60_000) return t.access_token;
   if (!t.refresh_token) throw new ConnectorError('reauth', 'Please reconnect your Google account');
-  const j = await tokenRequest({ client_id: ctx.cfg.googleClientId!, client_secret: ctx.cfg.googleClientSecret!, refresh_token: t.refresh_token, grant_type: 'refresh_token' });
+  const app = await requireApp(ctx);
+  const j = await tokenRequest({ client_id: app.clientId, client_secret: app.clientSecret, refresh_token: t.refresh_token, grant_type: 'refresh_token' });
   const next = { ...t, access_token: j.access_token, expires_at: Date.now() + j.expires_in * 1000 };
   await ctx.vault.put(ctx.userId, 'oauth', item.service, item.username, next);
   return next.access_token;
@@ -77,22 +140,12 @@ const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : typeo
 function googleConnector(id: 'gmail' | 'gcal' | 'gdrive', name: string, description: string, exec: ConnectorImpl['execute']): ConnectorImpl {
   return {
     id,
-    info: (cfg) => ({ id, name, description, kind: 'oauth', available: !!(cfg.googleClientId && cfg.googleClientSecret), scopes: CONNECTOR_SCOPES[id]! }),
+    info: (cfg) => ({ id, name, description, kind: 'oauth', group: 'google', available: !!(cfg.googleClientId && cfg.googleClientSecret), scopes: CONNECTOR_SCOPES[id]! }),
     async connect(ctx, scopes, state, challenge) {
-      if (!ctx.cfg.googleClientId) throw new ConnectorError('not_configured', 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to connect Google accounts');
-      const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-      u.search = new URLSearchParams({
-        client_id: ctx.cfg.googleClientId, redirect_uri: redirectUri(ctx.cfg), response_type: 'code', access_type: 'offline', prompt: 'consent',
-        include_granted_scopes: 'false', scope: googleScopes(id, scopes).join(' '), state, code_challenge: challenge, code_challenge_method: 'S256',
-      }).toString();
-      return { authorizeUrl: u.toString() };
+      return { authorizeUrl: await googleAuthorizeUrl(ctx, googleScopes(id, scopes), state, challenge) };
     },
     async complete(ctx, code, verifier) {
-      const j = await tokenRequest({ client_id: ctx.cfg.googleClientId!, client_secret: ctx.cfg.googleClientSecret!, code, code_verifier: verifier, grant_type: 'authorization_code', redirect_uri: redirectUri(ctx.cfg) });
-      let account = 'Google account';
-      try { account = JSON.parse(Buffer.from(String(j.id_token).split('.')[1]!, 'base64url').toString()).email ?? account; } catch { /* keep default */ }
-      const vaultId = await ctx.vault.put(ctx.userId, 'oauth', id, account, { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + j.expires_in * 1000, scope: j.scope });
-      return { account, vaultId };
+      return googleExchange(ctx, id, code, verifier);
     },
     async revoke(ctx) {
       if (!ctx.vaultId) return;

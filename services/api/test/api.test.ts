@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDb, migrate, type Db } from '@muse/db';
 import { Bus, redisConnection } from '@muse/runtime';
 import { type ActionRequest, actionHash, generateKeys, loadPrivate, signClaims } from '@muse/security';
@@ -11,8 +11,23 @@ import { Executor } from '../src/executor.js';
 import { Notifier } from '../src/notify.js';
 import { SandboxClient } from '../src/sandbox.js';
 import { Vault } from '../src/vault.js';
+import { encodeWav } from '../src/tts.js';
 
 const url = process.env.TEST_DATABASE_URL;
+
+describe('natural voice output', () => {
+  it('encodes 16-bit PCM WAV', () => {
+    const wav = encodeWav(new Float32Array([0, 1, -1, 0.5, 2]), 24000);
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
+    expect(wav.readUInt32LE(24)).toBe(24000);
+    expect(wav.readUInt16LE(34)).toBe(16);
+    expect(wav.length).toBe(44 + 10);
+    expect(wav.readInt16LE(46)).toBe(32767);
+    expect(wav.readInt16LE(48)).toBe(-32768);
+    expect(wav.readInt16LE(52)).toBe(32767); // clipped
+  });
+});
 const sentinelKeys = generateKeys();
 const executorKeys = generateKeys();
 
@@ -151,6 +166,95 @@ describe.skipIf(!url)('api', () => {
     expect(Buffer.from(raw.ciphertext).toString('latin1')).not.toContain('hunter2');
     const audit = await db.q('SELECT data, summary FROM audit_events WHERE user_id=$1', [userId]);
     expect(JSON.stringify(audit)).not.toContain('hunter2');
+  });
+
+  it('reports voice config and refuses server TTS when it is off', async () => {
+    const c = await app.inject({ method: 'GET', url: '/v1/voice/config', headers: H() });
+    expect(c.json().tts).toBe('device');
+    expect(c.json().natural.available).toBe(false);
+    expect(c.json().natural.voices[0].id).toBe('af_heart');
+    expect((await app.inject({ method: 'POST', url: '/v1/voice/tts', headers: H(), payload: { text: 'Hi' } })).statusCode).toBe(501);
+  });
+
+  it('upgrades old robotic voice defaults and accepts natural voice settings', async () => {
+    await db.q(`UPDATE users SET avatar = jsonb_set(coalesce(avatar, '{}'::jsonb), '{voice}', '{"provider":"device","voiceId":"","rate":1,"pitch":1}') WHERE id=$1`, [userId]);
+    const me = await app.inject({ method: 'GET', url: '/v1/me', headers: H() });
+    expect(me.json().avatar.voice).toMatchObject({ provider: 'auto', naturalVoice: 'af_heart' });
+    const r = await app.inject({ method: 'PUT', url: '/v1/me/avatar', headers: H(), payload: { ...me.json().avatar, voice: { provider: 'server', voiceId: '', naturalVoice: 'af_bella', rate: 1, pitch: 1.15 } } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().avatar.voice.naturalVoice).toBe('af_bella');
+  });
+
+  it('one-tap demo connect uses recommended permissions', async () => {
+    const r = await app.inject({ method: 'POST', url: '/v1/connect/quick', headers: H(), payload: { preset: 'demo' } });
+    expect(r.statusCode).toBe(200);
+    const byId = Object.fromEntries(r.json().connections.map((c: { connector: string; scopes: string[] }) => [c.connector, c.scopes]));
+    expect(byId.demo_mail).toEqual(['read', 'compose', 'send']);
+    expect(byId.demo_calendar).toEqual(['read', 'write']);
+  });
+
+  it('Google: in-app setup, one consent for all services, shared token revoked only with the last connection', async () => {
+    const setup0 = await app.inject({ method: 'GET', url: '/v1/setup/google', headers: H() });
+    expect(setup0.json()).toMatchObject({ configured: false, redirectUri: 'http://localhost:4000/v1/oauth/google/callback' });
+    const notYet = await app.inject({ method: 'POST', url: '/v1/connect/quick', headers: H(), payload: { preset: 'google' } });
+    expect(notYet.statusCode).toBe(400);
+    expect(notYet.json().message).toContain('Set up Google');
+    expect((await app.inject({ method: 'PUT', url: '/v1/setup/google', headers: H(), payload: { clientId: 'nope', clientSecret: 'GOCSPX-abcdefghij' } })).statusCode).toBe(400);
+
+    const realFetch = globalThis.fetch;
+    const calls: string[] = [];
+    const idToken = `x.${Buffer.from(JSON.stringify({ email: 'me@gmail.example' })).toString('base64url')}.y`;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const u = String(input);
+      calls.push(u);
+      if (u.startsWith('https://oauth2.googleapis.com/token')) {
+        const body = new URLSearchParams(String(init?.body));
+        if (body.get('client_secret') === 'GOCSPX-wrong-secret') return new Response(JSON.stringify({ error: 'invalid_client' }), { status: 401 });
+        if (body.get('code') === 'freemuse-setup-check') return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
+        return new Response(JSON.stringify({ access_token: 'at', refresh_token: 'rt', expires_in: 3600, id_token: idToken, scope: 'x' }));
+      }
+      if (u.startsWith('https://oauth2.googleapis.com/revoke')) return new Response('{}');
+      return realFetch(input, init);
+    });
+    try {
+      const clientId = '1234-abc.apps.googleusercontent.com';
+      const bad = await app.inject({ method: 'PUT', url: '/v1/setup/google', headers: H(), payload: { clientId, clientSecret: 'GOCSPX-wrong-secret' } });
+      expect(bad.json().code).toBe('invalid_client');
+      const ok = await app.inject({ method: 'PUT', url: '/v1/setup/google', headers: H(), payload: { clientId, clientSecret: 'GOCSPX-test-secret' } });
+      expect(ok.json()).toEqual({ ok: true, verified: true });
+      expect((await app.inject({ method: 'GET', url: '/v1/setup/google', headers: H() })).json()).toMatchObject({ configured: true, source: 'you' });
+      const cons = (await app.inject({ method: 'GET', url: '/v1/connectors', headers: H() })).json().connectors;
+      expect(cons.find((c: { id: string }) => c.id === 'gmail')).toMatchObject({ available: true, group: 'google', recommended: ['read', 'compose', 'send'] });
+      // The app's secret is never listed with saved logins.
+      expect(JSON.stringify((await app.inject({ method: 'GET', url: '/v1/vault', headers: H() })).json())).not.toContain('GOCSPX');
+
+      const q = await app.inject({ method: 'POST', url: '/v1/connect/quick', headers: H(), payload: { preset: 'google' } });
+      const auth = new URL(q.json().authorizeUrl);
+      expect(auth.searchParams.get('client_id')).toBe(clientId);
+      const scope = auth.searchParams.get('scope')!;
+      for (const s of ['gmail.readonly', 'gmail.send', 'calendar.events', 'drive.readonly']) expect(scope).toContain(s);
+      const state = auth.searchParams.get('state')!;
+
+      const cb = await app.inject({ method: 'GET', url: `/v1/oauth/google/callback?state=${state}&code=abc` });
+      expect(cb.headers.location).toContain('connected=Google');
+      const rows = await db.q("SELECT connector, scopes, account, vault_id FROM connections WHERE user_id=$1 AND connector IN ('gmail','gcal','gdrive') ORDER BY connector", [userId]);
+      expect(rows.map((r) => r.connector)).toEqual(['gcal', 'gdrive', 'gmail']);
+      expect(new Set(rows.map((r) => r.vault_id)).size).toBe(1);
+      expect(rows[0].account).toBe('me@gmail.example');
+
+      const conns = (await app.inject({ method: 'GET', url: '/v1/connections', headers: H() })).json().connections as { id: string; connector: string }[];
+      const id = (c: string) => conns.find((x) => x.connector === c)!.id;
+      await app.inject({ method: 'DELETE', url: `/v1/connections/${id('gmail')}`, headers: H() });
+      await app.inject({ method: 'DELETE', url: `/v1/connections/${id('gcal')}`, headers: H() });
+      expect(calls.some((u) => u.includes('/revoke'))).toBe(false);
+      await app.inject({ method: 'DELETE', url: `/v1/connections/${id('gdrive')}`, headers: H() });
+      expect(calls.filter((u) => u.includes('/revoke'))).toHaveLength(1);
+
+      await app.inject({ method: 'DELETE', url: '/v1/setup/google', headers: H() });
+      expect((await app.inject({ method: 'GET', url: '/v1/setup/google', headers: H() })).json().configured).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('exports data without secrets and deletes everything', async () => {

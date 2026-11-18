@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { DEFAULT_AVATAR, DEFAULT_SETTINGS, GLASSES, HATS, SCARVES, UserSettings, type AvatarSettings } from '@muse/core';
+import { DEFAULT_AVATAR, DEFAULT_SETTINGS, GLASSES, HATS, normalizeVoicePref, SCARVES, UserSettings, type AvatarSettings } from '@muse/core';
 import type { Me } from '@muse/core';
 import { appendAudit } from '@muse/db';
 import { SESSION_COOKIE } from '../auth.js';
@@ -13,7 +13,7 @@ export async function loadMe(d: Deps, userId: string): Promise<Me> {
     email: u.email,
     createdAt: new Date(u.created_at).toISOString(),
     onboarded: u.onboarded,
-    avatar: { ...DEFAULT_AVATAR, ...u.avatar, personality: { ...DEFAULT_AVATAR.personality, ...u.avatar?.personality }, voice: { ...DEFAULT_AVATAR.voice, ...u.avatar?.voice }, outfit: { ...DEFAULT_AVATAR.outfit, ...u.avatar?.outfit } },
+    avatar: { ...DEFAULT_AVATAR, ...u.avatar, personality: { ...DEFAULT_AVATAR.personality, ...u.avatar?.personality }, voice: normalizeVoicePref(u.avatar?.voice), outfit: { ...DEFAULT_AVATAR.outfit, ...u.avatar?.outfit } },
     settings: { ...DEFAULT_SETTINGS, ...u.settings },
   };
 }
@@ -24,7 +24,7 @@ const AvatarInput = z.object({
   name: z.string().trim().min(1).max(40),
   persona: z.string().max(1000),
   personality: z.object({ warmth: slider, playfulness: slider, verbosity: slider, proactivity: slider, formality: slider }),
-  voice: z.object({ provider: z.enum(['device', 'server']), voiceId: z.string().max(200), rate: z.number().min(0.5).max(2), pitch: z.number().min(0.5).max(2) }),
+  voice: z.object({ provider: z.enum(['auto', 'device', 'server']), voiceId: z.string().max(200), naturalVoice: z.string().max(40).default('af_heart'), rate: z.number().min(0.5).max(2), pitch: z.number().min(0.5).max(2) }),
   outfit: z.object({ hat: z.enum(HATS), hatColor: color, glasses: z.enum(GLASSES), scarf: z.enum(SCARVES), scarfColor: color, hoodieColor: color, furTint: color }),
 });
 

@@ -25,7 +25,7 @@ const env = {
   SENTINEL_URL: `http://localhost:${PORTS.sentinel}`, EXECUTOR_URL: `http://localhost:${PORTS.api}`,
   SANDBOX_DRIVER: 'local', EGRESS_PROXY_URL: `http://127.0.0.1:${PORTS.egress}`, EGRESS_ALLOW_PRIVATE_HOSTS: '127.0.0.1',
   FIXTURE_PORT: String(PORTS.fixtures), DEMO_DEALS_URL: `http://127.0.0.1:${PORTS.fixtures}/evil`, DEMO_TASK_MINUTES: '1',
-  STT_PROVIDER: 'none', NEXT_DIST_DIR: '.next-e2e', LOG_LEVEL: 'warn', NEXT_TELEMETRY_DISABLED: '1',
+  STT_PROVIDER: 'none', TTS_PROVIDER: 'device', NEXT_DIST_DIR: '.next-e2e', LOG_LEVEL: 'warn', NEXT_TELEMETRY_DISABLED: '1',
 };
 const run = (name, cmd, args) => {
   const p = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });

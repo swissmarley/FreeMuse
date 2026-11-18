@@ -1,4 +1,4 @@
-appId: local.personal.museclone
+appId: local.personal.freemuse
 ---
 - launchApp: { clearState: true }
 - tapOn: "Let's start"

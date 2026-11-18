@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import * as Speech from 'expo-speech';
 import { type AvatarSettings, type AvatarState, AVATAR_STATES, GLASSES, HATS, SCARVES } from '@muse/core/avatar';
 import { api } from '../src/api';
 import { Avatar } from '../src/Avatar';
 import { useMuse } from '../src/store';
 import { useTheme } from '../src/theme';
 import { Button, Card, Field, Screen } from '../src/ui';
+import { type DeviceVoiceLike, isNiceDeviceVoice, naturalVoiceSpeaks } from '@muse/core/voice';
+import { previewVoice, rankedDeviceVoices, useVoiceConfig } from '../src/voice';
 
 const COLORS = ['#F3E7D3', '#F7D9C4', '#E8D5F2', '#CFE3F5', '#D7EBD3', '#F6E3A6', '#C9465A', '#6B4E31', '#8DB7D9'];
 const SLIDERS: (keyof AvatarSettings['personality'])[] = ['warmth', 'playfulness', 'verbosity', 'proactivity', 'formality'];
@@ -54,12 +55,42 @@ function Stepper({ label, value, onChange }: { label: string; value: number; onC
   );
 }
 
+function SpeedPitch({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void }) {
+  const th = useTheme();
+  const step = (d: number) => onChange(Math.round(Math.max(min, Math.min(max, value + d)) * 100) / 100);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }} accessible accessibilityRole="adjustable" accessibilityLabel={label} accessibilityValue={{ text: value.toFixed(2) }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]} onAccessibilityAction={(e) => step(e.nativeEvent.actionName === 'increment' ? 0.05 : -0.05)}>
+      <Text style={{ color: th.text, flex: 1, fontWeight: '700' }}>{label}</Text>
+      <Button kind="secondary" label="−" onPress={() => step(-0.05)} />
+      <Text style={{ color: th.text, width: 44, textAlign: 'center' }}>{value.toFixed(2)}</Text>
+      <Button kind="secondary" label="+" onPress={() => step(0.05)} />
+    </View>
+  );
+}
+
 export default function AvatarScreen() {
   const { s, refreshMe } = useMuse();
   const [a, setA] = useState<AvatarSettings>(s.me!.avatar);
   const [preview, setPreview] = useState<AvatarState>('wave');
   const o = a.outfit;
   const setO = (p: Partial<AvatarSettings['outfit']>) => setA({ ...a, outfit: { ...o, ...p } });
+  const th = useTheme();
+  const lang = s.me!.settings.language;
+  const vcfg = useVoiceConfig();
+  const [devVoices, setDevVoices] = useState<DeviceVoiceLike[]>([]);
+  const [trying, setTrying] = useState(false);
+  useEffect(() => { void rankedDeviceVoices(lang).then(setDevVoices); }, [lang]);
+  const v = a.voice;
+  const setV = (p: Partial<AvatarSettings['voice']>) => setA({ ...a, voice: { ...v, ...p } });
+  const naturalOk = !!vcfg?.natural.available;
+  const tryVoice = async (pref = v) => {
+    setTrying(true);
+    setPreview('speaking');
+    try { await previewVoice(pref, lang, `Hi, I'm ${a.name}! How can I help you today?`); } finally { setTrying(false); setPreview('happy'); }
+  };
+  const ENGINES = ['auto', 'server', 'device'] as const;
+  const ENGINE_LABEL = { auto: 'Automatic', server: 'Natural voice', device: 'Device voice' } as const;
   return (
     <Screen>
       <Card style={{ alignItems: 'center' }}>
@@ -79,7 +110,27 @@ export default function AvatarScreen() {
       <Card>
         {SLIDERS.map((k) => <Stepper key={k} label={k} value={a.personality[k]} onChange={(v) => setA({ ...a, personality: { ...a.personality, [k]: v } })} />)}
         <Field label="Persona (style only)" value={a.persona} onChangeText={(persona) => setA({ ...a, persona })} multiline maxLength={1000} />
-        <Button kind="secondary" label="Try voice" onPress={() => { setPreview('speaking'); Speech.speak(`Hi, I'm ${a.name}!`, { rate: a.voice.rate, pitch: a.voice.pitch, onDone: () => setPreview('idle') }); }} />
+      </Card>
+      <Card>
+        <Text accessibilityRole="header" style={{ color: th.text, fontWeight: '800', fontSize: 17 }}>Voice</Text>
+        <Options label="How it speaks" values={ENGINES.map((e) => ENGINE_LABEL[e])} value={ENGINE_LABEL[v.provider]}
+          onChange={(label) => { const p = ENGINES.find((e) => ENGINE_LABEL[e] === label)!; setV(p === 'device' ? { provider: p, voiceId: v.voiceId || devVoices[0]?.id || '' } : { provider: p }); }} />
+        {v.provider !== 'device' && naturalOk && (
+          <>
+            <Options label="Natural voice" values={vcfg!.natural.voices.map((n) => n.label)} value={vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.label ?? 'Heart'}
+              onChange={(label) => setV({ naturalVoice: vcfg!.natural.voices.find((n) => n.label === label)!.id })} />
+            <Text style={{ color: th.textMuted, fontSize: 13 }}>{vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.description}{!naturalVoiceSpeaks(lang) ? ' · Natural voices speak English; in your language the best device voice is used.' : ''}</Text>
+          </>
+        )}
+        {v.provider !== 'device' && !naturalOk && <Text style={{ color: th.textMuted, fontSize: 13 }}>Natural voices are off on this server, so the most natural voice on this phone is used.</Text>}
+        {(v.provider === 'device' || !naturalOk || !naturalVoiceSpeaks(lang)) && devVoices.length > 0 && (
+          <Options label="Device voice (★ = natural)" values={devVoices.slice(0, 10).map((d) => `${isNiceDeviceVoice(d, lang) ? '★ ' : ''}${d.name}`)}
+            value={(() => { const d = devVoices.find((x) => x.id === v.voiceId) ?? devVoices[0]!; return `${isNiceDeviceVoice(d, lang) ? '★ ' : ''}${d.name}`; })()}
+            onChange={(label) => { const d = devVoices.find((x) => label.endsWith(x.name)); if (d) setV({ voiceId: d.id }); }} />
+        )}
+        <SpeedPitch label="Speed" value={v.rate} min={0.5} max={2} onChange={(rate) => setV({ rate })} />
+        <SpeedPitch label="Pitch (higher = cuter)" value={v.pitch} min={0.8} max={1.3} onChange={(pitch) => setV({ pitch })} />
+        <Button kind="secondary" label={trying ? 'Speaking…' : 'Try voice'} disabled={trying} onPress={() => void tryVoice()} />
       </Card>
       <Button label="Save" disabled={!a.name.trim()} onPress={async () => { await api.saveAvatar(a); await refreshMe(); setPreview('happy'); }} />
     </Screen>

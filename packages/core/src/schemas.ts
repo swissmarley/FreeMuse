@@ -112,6 +112,10 @@ export const ConnectorInfo = z.object({
   kind: z.enum(['oauth', 'demo']),
   available: z.boolean(),
   scopes: z.array(ScopeDef),
+  /** Connectors in a group can be connected together in one step. */
+  group: z.enum(['google', 'demo']).optional(),
+  /** Permissions pre-selected for one-tap connect. Sensitive actions still always ask first. */
+  recommended: z.array(z.string()).optional(),
 });
 export type ConnectorInfo = z.infer<typeof ConnectorInfo>;
 

@@ -6,6 +6,7 @@ import type {
   Approval, AuditEvent, ChatMessage, Connection, ConnectorInfo, Memory, StreamEvent, Task, UserSettings,
 } from './schemas';
 import type { AvatarSettings } from './avatar/config';
+import type { NaturalVoice } from './voice';
 
 export interface ClientOptions {
   baseUrl: string;
@@ -29,6 +30,12 @@ export interface Me {
   avatar: AvatarSettings;
   settings: UserSettings;
   onboarded: boolean;
+}
+
+export interface VoiceConfig {
+  stt: boolean;
+  tts: string;
+  natural: { available: boolean; status: string; languages: readonly string[]; voices: readonly NaturalVoice[] };
 }
 
 export class MuseClient {
@@ -105,6 +112,15 @@ export class MuseClient {
   }
   updateScopes(id: string, scopes: string[]) { return this.req<{ connection: Connection; authorizeUrl?: string }>('PATCH', `/v1/connections/${id}`, { scopes }); }
   disconnect(id: string) { return this.req<{ ok: true }>('DELETE', `/v1/connections/${id}`); }
+  /** One-tap connect with recommended permissions: 'demo' connects instantly, 'google' returns one consent URL. */
+  quickConnect(preset: 'demo' | 'google', connectors?: string[]) {
+    return this.req<{ authorizeUrl?: string; connections?: Connection[] }>('POST', '/v1/connect/quick', { preset, connectors });
+  }
+  googleSetup() {
+    return this.req<{ configured: boolean; source: 'you' | 'server' | null; clientIdHint: string | null; redirectUri: string; javascriptOrigin: string }>('GET', '/v1/setup/google');
+  }
+  saveGoogleSetup(clientId: string, clientSecret: string) { return this.req<{ ok: true; verified: boolean }>('PUT', '/v1/setup/google', { clientId, clientSecret }); }
+  removeGoogleSetup() { return this.req<{ ok: true }>('DELETE', '/v1/setup/google'); }
 
   // vault (write-only from the client's perspective: values are never returned)
   vaultList() { return this.req<{ items: { id: string; service: string; username: string; createdAt: string }[] }>('GET', '/v1/vault'); }
@@ -124,6 +140,21 @@ export class MuseClient {
 
   // voice
   transcribe(base64Audio: string, mime: string) { return this.req<{ text: string }>('POST', '/v1/voice/transcribe', { audio: base64Audio, mime }); }
+  voiceConfig() { return this.req<VoiceConfig>('GET', '/v1/voice/config'); }
+  /** Natural-voice speech for one short chunk of text. Returns audio bytes and their MIME type. */
+  async tts(text: string, voice: string, speed = 1): Promise<{ audio: ArrayBuffer; mime: string }> {
+    const res = await fetch(this.opts.baseUrl + '/v1/voice/tts', {
+      method: 'POST',
+      headers: await this.headers(true),
+      body: JSON.stringify({ text, voice, speed }),
+      credentials: this.opts.credentials ?? 'include',
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, data.code ?? 'tts_failed', data.message ?? 'Speech failed');
+    }
+    return { audio: await res.arrayBuffer(), mime: res.headers.get('content-type') ?? 'audio/wav' };
+  }
 
   /** Subscribe to server events. Returns an unsubscribe function. Reconnects with backoff. */
   stream(onEvent: (e: StreamEvent) => void, onStatus?: (s: 'open' | 'closed') => void): () => void {

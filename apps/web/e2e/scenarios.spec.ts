@@ -49,18 +49,45 @@ test('adult signs up, names the avatar and lands in chat', async () => {
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByText('What should you call me?')).toBeVisible();
   await page.getByLabel('Name').fill('Pip');
-  await page.getByRole('button', { name: 'Start chatting' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByText('Shall I help with your email and calendar?')).toBeVisible();
+  await page.getByRole('button', { name: /start chatting/i }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { name: 'Pip' })).toBeVisible();
 });
 
 test('connect Demo Mail with granular scopes', async () => {
   await page.goto('/connections');
-  const card = page.locator('article', { hasText: 'Demo Mail' });
+  const card = page.locator('article.conn-card', { hasText: 'Demo Mail' });
+  await card.locator('summary').click();
   await card.getByLabel('Write drafts').check();
   await card.getByLabel('Send email').check();
-  await card.getByRole('button', { name: 'Connect' }).click();
+  await card.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(card.getByText(/Connected/)).toBeVisible();
+});
+
+test('one-tap demo connect, and Google offers a guided setup instead of env vars', async () => {
+  await page.goto('/connections');
+  await page.getByRole('button', { name: 'Connect demo in one tap' }).click();
+  await expect(page.locator('article.conn-card', { hasText: 'Demo Calendar' }).getByText(/Connected/)).toBeVisible();
+  await page.locator('.quick-tile', { hasText: 'Google' }).getByRole('button', { name: 'Set up Google' }).click();
+  await expect(page.getByRole('heading', { name: /Set up Google/ })).toBeVisible();
+  await expect(page.getByText('/v1/oauth/google/callback')).toBeVisible();
+  await page.getByLabel('Client ID').fill('not-a-client-id');
+  await page.getByLabel('Client secret').fill('GOCSPX-test-secret');
+  await page.getByRole('button', { name: 'Save & check' }).click();
+  await expect(page.locator('.setup-guide [role=alert]')).toContainText('apps.googleusercontent.com');
+});
+
+test('voice mode: the character greets you and reacts when tapped', async () => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start voice mode' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Voice mode' });
+  await expect(dialog.getByText(/I'm all ears/)).toBeVisible();
+  await dialog.getByRole('button', { name: /Tap to play with/ }).click();
+  await expect(dialog.locator('.vm-bubble')).toContainText(/tickles/);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
 });
 
 test('scenario 1: trip + host email waits for approval, approve sends it', async () => {

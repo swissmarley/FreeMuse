@@ -1,4 +1,4 @@
-# Muse Clone (personal)
+# Free Muse
 
 A self-hosted **personal AI agent** for personal use. It doesn't just chat: it plans, delegates work to specialist
 subagents, browses in a sandboxed browser, handles email and calendar, and keeps working on background tasks after you
@@ -77,27 +77,40 @@ All variables are documented in [`.env.example`](.env.example). The important on
 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_FALLBACK_MODEL` | `https://api.meta.ai/v1` / `muse-spark-1.3` / `muse-spark-1.1` | Switch provider/model with env only |
 | `LLM_EFFORT` | `high` | Reasoning effort (`minimal`…`max`) |
 | `SENTINEL_MODEL_API_KEY` | falls back to `MODEL_API_KEY` | Separate credentials for the Sentinel reviewer |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Enables Gmail / Calendar / Drive. Redirect URI: `${API_PUBLIC_URL}/v1/oauth/google/callback` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | Optional server-wide Google OAuth client. Not needed: users can paste their own in the app (**Connections → Set up Google**). Redirect URI: `${API_PUBLIC_URL}/v1/oauth/google/callback` |
 | `SANDBOX_DRIVER` | `docker` in compose, `local` in dev | Per-user container vs in-process Chromium |
 | `SANDBOX_RUNTIME` | — | e.g. `runsc` (gVisor) for stronger isolation |
 | `PAYMENT_PROVIDER` | `virtual-card-stub` | or `stripe-test` (requires an `sk_test_` key; live keys are refused) |
 | `SPEND_LIMIT_CENTS` | `50000` | Hard per-purchase cap enforced by the Sentinel |
 | `EMBEDDINGS_PROVIDER` | `hash` | Model API has no embeddings. Local hashing vectors + full-text search, or `openai-compatible` |
-| `TTS_PROVIDER` | `device` | On-device speech (Model API has no TTS), or `openai-compatible` |
+| `TTS_PROVIDER` | `local` | `local`: natural neural voices (Kokoro-82M) generated inside the API, free and private. `openai-compatible` (e.g. Kokoro-FastAPI, OpenAI) or `device` (on-device only) |
+| `TTS_CACHE_DIR` / `TTS_DTYPE` / `TTS_PRELOAD` | — / `q8` / `true` | Where the ~90 MB voice model is cached, its precision, and whether to warm it at startup |
 | `STT_PROVIDER` | `meta` | `muse-voice-transcribe-1.0` (realtime WebSocket + file), proxied server-side |
 | `VAPID_*` / `EXPO_ACCESS_TOKEN` | generated / — | Web Push / Expo push |
 | `ALLOW_CONTRIBUTOR_MODE` | `false` | Contributor-mode (training) models are only used if this is true **and** the user opts in |
 
 Voice defaults: STT is Meta `muse-voice-transcribe-1.0`. On the web it streams 24 kHz PCM through an AudioWorklet into the API's
 WebSocket proxy, so the key never reaches the client. On mobile it records a clip, and the server converts it with ffmpeg and
-transcribes it. TTS uses the Web Speech API / `expo-speech`, with word-boundary lip-sync for the avatar.
+transcribes it.
+
+**Text-to-speech uses natural neural voices by default.** The API runs [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+(Apache-2.0) on the CPU through `kokoro-js`, so speech sounds human, costs nothing, and the text never leaves your server. The
+model (~90 MB) downloads once on first start (`docker compose` keeps it in the `models` volume). Replies are split into sentences
+and streamed, so the first sentence plays while the rest is synthesised. Pick a voice (Heart, Bella, Nicole, Sky, …) in
+**Customise → Voice**; a slightly higher pitch makes the character sound cuter. Natural voices speak English; for other languages,
+or if the model isn't available, the app picks the most natural voice installed on the device (it ranks voices and avoids
+robotic engines such as eSpeak) instead of the system default.
 
 ## Avatar
 
 `<Avatar>` renders an **original**, stylised plush character drawn as vectors. It is not Meta's artwork: it has a scalloped
 fur hood, ear nubs, a little sprout, a pale face, glossy eyes, blush and a small smile. The same model renders through DOM SVG
-(web) and `react-native-svg` (mobile). States: idle (breathing), blink (random 3–6 s), wave, thinking, speaking (mouth driven
-by TTS amplitude or word boundaries), happy, working, sleeping. It respects "reduce motion". To use your own artwork, add it
+(web) and `react-native-svg` (mobile). States: idle (breathing, gentle sway, wandering gaze), blink (random 3–6 s), wave, **listening** (ears perk up and
+wiggle with your voice, sound waves by the ear), thinking, speaking (mouth driven by TTS amplitude, head bob and hand gestures),
+happy, working, sleeping. On top of that it plays **reactions**: giggle, love (floating hearts), jump, cheer (sparkles), nod,
+curious (question mark), oops (sweat drop) and hello. In **voice mode** the character is big and interactive: its eyes follow your
+pointer, you can tap it to play, it nods when you finish talking and reacts to what it says (cheers when something is done, a
+little "oops" when it can't, hearts when you say thanks). It respects "reduce motion". To use your own artwork, add it
 to `assets/avatar/` and set `AVATAR_ASSET` in `packages/core/src/avatar/config.ts`. The default name lives in the same file
 (`DEFAULT_AVATAR_NAME`). The customiser covers name, personality sliders and free-text persona (both feed the system prompt),
 voice, hat, scarf, glasses, hoodie colour and fur tint.
@@ -117,8 +130,8 @@ injection, so the tests prove that the Sentinel and approval layers stop attacks
 
 ## Demo script (five scenarios)
 
-Sign up (you must be 18+), then open **Connections** and connect **Demo Mail** with *Read*, *Write drafts* and *Send email*, plus
-**Demo Calendar**. These are local practice accounts with sample emails, so nothing leaves your server. Turn on notifications in
+Sign up (you must be 18+). The last onboarding step offers **Try with demo data**, which connects **Demo Mail** and **Demo
+Calendar** in one tap (or use **Connections → Try with demo data** later). These are local practice accounts with sample emails, so nothing leaves your server. Turn on notifications in
 **Settings**.
 
 1. **"Plan my trip to Lisbon and draft the email to my host (needs approval)."**
@@ -145,8 +158,16 @@ Sign up (you must be 18+), then open **Connections** and connect **Demo Mail** w
    by injected content and **denies** the send (`DENY` in Activity), so nothing goes out. Pages read in the sandbox browser get
    the same treatment (see the hidden-text fixture in `services/sandbox/test/fixtures.ts`).
 
+### Connecting Google
+
+Open **Connections**. If the server has no `GOOGLE_CLIENT_ID`, tap **Set up Google**: a short guide with direct links walks you
+through creating your own private Google OAuth client (create project → enable APIs in one click → consent screen → client with the
+redirect URI you can copy). Paste the Client ID and secret; Free Muse checks them with Google and stores them encrypted in your vault.
+No config files, no restart. Then **Connect with Google** connects Gmail, Calendar and Drive behind **one** consent screen, with
+recommended permissions (sending and creating events still ask you first, every time).
+
 Also try: *"Remember that Anna is vegetarian"* → **Memory**; then *"Forget that Anna is vegetarian"*. Try **Voice** mode
-(hold to talk). In **Settings**, try **Export my data** and **Delete everything**.
+(hold to talk, or tap once and tap again; tap the character to play). In **Settings**, try **Export my data** and **Delete everything**.
 
 ## Security notes
 

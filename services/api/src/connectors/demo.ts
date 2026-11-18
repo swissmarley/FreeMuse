@@ -44,7 +44,7 @@ export async function seedDemoCalendar(db: Db, userId: string): Promise<void> {
 
 export const demoMail: ConnectorImpl = {
   id: 'demo_mail',
-  info: () => ({ id: 'demo_mail', name: 'Demo Mail', description: 'A local practice mailbox with sample emails. Nothing leaves your server.', kind: 'demo', available: true, scopes: CONNECTOR_SCOPES.demo_mail! }),
+  info: () => ({ id: 'demo_mail', name: 'Demo Mail', description: 'A local practice mailbox with sample emails. Nothing leaves your server.', kind: 'demo', group: 'demo', available: true, scopes: CONNECTOR_SCOPES.demo_mail! }),
   async connect(ctx) {
     await seedDemoMail(ctx.db, ctx.userId);
     return { account: DEMO_ADDRESS };
@@ -87,7 +87,7 @@ export const demoMail: ConnectorImpl = {
 
 export const demoCalendar: ConnectorImpl = {
   id: 'demo_calendar',
-  info: () => ({ id: 'demo_calendar', name: 'Demo Calendar', description: 'A local practice calendar with sample events.', kind: 'demo', available: true, scopes: CONNECTOR_SCOPES.demo_calendar! }),
+  info: () => ({ id: 'demo_calendar', name: 'Demo Calendar', description: 'A local practice calendar with sample events.', kind: 'demo', group: 'demo', available: true, scopes: CONNECTOR_SCOPES.demo_calendar! }),
   async connect(ctx) {
     await seedDemoCalendar(ctx.db, ctx.userId);
     return { account: 'Demo calendar' };

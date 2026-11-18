@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ageOn, MIN_AGE } from '@muse/core/schemas';
 import { BRAND } from '@muse/core/brand';
 import { DEFAULT_AVATAR, type AvatarSettings } from '@muse/core/avatar';
@@ -8,9 +8,9 @@ import { strings } from '@muse/core/i18n';
 import { Avatar } from '../../components/Avatar';
 import { api } from '../../lib/api';
 import { fmt, useMuse } from '../../lib/store';
-import { DeviceTTS } from '../../lib/voice';
+import { previewVoice } from '../../lib/voice';
 
-type Step = 'hello' | 'age' | 'account' | 'name' | 'blocked';
+type Step = 'hello' | 'age' | 'account' | 'name' | 'connect' | 'blocked';
 
 export default function Onboarding() {
   const { s, refreshMe } = useMuse();
@@ -25,6 +25,14 @@ export default function Onboarding() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [avatar, setAvatar] = useState<AvatarSettings>(DEFAULT_AVATAR);
+  const [speaking, setSpeaking] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+  const mouth = useRef(0);
+
+  const hearVoice = async () => {
+    setSpeaking(true);
+    try { await previewVoice(avatar.voice, 'en', `Hi! I'm ${avatar.name}. I can't wait to help you!`, (v) => { mouth.current = v; }); } finally { setSpeaking(false); mouth.current = 0; }
+  };
 
   useEffect(() => {
     if (s.me?.onboarded) router.replace('/');
@@ -55,21 +63,38 @@ export default function Onboarding() {
     }
   };
 
-  const finish = async () => {
+  const toConnect = async () => {
     setBusy(true);
+    setError('');
     try {
       await api.saveAvatar(avatar);
+      const { connectors } = await api.connectors().catch(() => ({ connectors: [] as { group?: string; available: boolean }[] }));
+      setGoogleReady(connectors.some((c) => c.group === 'google' && c.available));
+      setStep('connect');
+    } catch (er) { setError((er as Error).message); } finally { setBusy(false); }
+  };
+
+  /** Finish onboarding, optionally connecting apps in one tap on the way. */
+  const finish = async (connect?: 'demo' | 'google') => {
+    setBusy(true);
+    setError('');
+    try {
       await api.completeOnboarding();
+      if (connect === 'google') {
+        const r = await api.quickConnect('google');
+        if (r.authorizeUrl) { window.location.href = r.authorizeUrl; return; }
+      }
+      if (connect === 'demo') await api.quickConnect('demo');
       await refreshMe();
       router.replace('/');
     } catch (er) { setError((er as Error).message); setBusy(false); }
   };
 
-  const avatarState = step === 'hello' ? 'wave' : step === 'blocked' ? 'sleeping' : step === 'name' ? 'happy' : 'idle';
+  const avatarState = speaking ? 'speaking' : step === 'hello' ? 'wave' : step === 'blocked' ? 'sleeping' : step === 'name' || step === 'connect' ? 'happy' : 'idle';
   return (
     <main className="center">
       <div className="onboard">
-        <Avatar settings={avatar} state={avatarState} size={170} />
+        <Avatar settings={avatar} state={avatarState} size={170} mouthRef={speaking ? mouth : undefined} />
         {step === 'hello' && (
           <div className="pop">
             <div className="speech" aria-live="polite">{fmt(t.welcomeTitle, { name: avatar.name })} 👋</div>
@@ -115,10 +140,21 @@ export default function Onboarding() {
             <label className="field">Name<input className="input" value={avatar.name} maxLength={40} onChange={(e) => setAvatar({ ...avatar, name: e.target.value })} /></label>
             <label className="field">Speaking speed<input type="range" min={0.6} max={1.6} step={0.05} value={avatar.voice.rate} onChange={(e) => setAvatar({ ...avatar, voice: { ...avatar.voice, rate: Number(e.target.value) } })} /></label>
             <label className="field">Voice pitch<input type="range" min={0.6} max={1.6} step={0.05} value={avatar.voice.pitch} onChange={(e) => setAvatar({ ...avatar, voice: { ...avatar.voice, pitch: Number(e.target.value) } })} /></label>
-            <button type="button" className="btn secondary" onClick={() => void new DeviceTTS(avatar.voice, 'en').speak(`Hi! I'm ${avatar.name}.`, () => {})}>Hear my voice</button>
+            <button type="button" className="btn secondary" disabled={speaking} onClick={() => void hearVoice()}>{speaking ? 'Speaking…' : 'Hear my voice'}</button>
             {error && <p role="alert" style={{ color: 'var(--c-danger)', margin: 0 }}>{error}</p>}
-            <button className="btn" disabled={busy || !avatar.name.trim()} onClick={() => void finish()}>Start chatting</button>
+            <button className="btn" disabled={busy || !avatar.name.trim()} onClick={() => void toConnect()}>Continue</button>
             <p className="muted" style={{ fontSize: '.85rem', margin: 0 }}>You can change my look, personality and voice any time.</p>
+          </div>
+        )}
+        {step === 'connect' && (
+          <div className="card stack pop">
+            <h1 style={{ fontSize: '1.3rem', margin: 0 }}>Shall I help with your email and calendar?</h1>
+            <p className="muted" style={{ margin: 0 }}>One tap. I always ask before sending, booking or paying anything.</p>
+            {googleReady && <button className="btn" disabled={busy} onClick={() => void finish('google')}>✉️📅 Connect Google</button>}
+            <button className="btn secondary" disabled={busy} onClick={() => void finish('demo')}>🧪 Try with demo data</button>
+            {!googleReady && <p className="hint" style={{ margin: 0 }}>Want Gmail and Google Calendar? You can set them up any time under <strong>Connections</strong>, with a short guide.</p>}
+            {error && <p role="alert" style={{ color: 'var(--c-danger)', margin: 0 }}>{error}</p>}
+            <button className="btn ghost" disabled={busy} onClick={() => void finish()}>Skip for now, start chatting</button>
           </div>
         )}
       </div>
