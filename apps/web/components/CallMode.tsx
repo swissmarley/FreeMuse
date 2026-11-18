@@ -58,6 +58,7 @@ export function CallMode({ avatar, state, lang, t, reducedMotion, speech, lastRe
   const mutedRef = useRef(false);
   const taps = useRef(0);
   const closed = useRef(false);
+  const bargedRef = useRef(false);
   // Always use the latest speech engine / callbacks (the voice config loads asynchronously).
   const sp = useRef(speech);
   sp.current = speech;
@@ -90,6 +91,7 @@ export function CallMode({ avatar, state, lang, t, reducedMotion, speech, lastRe
       const m = new CallMic(lang, {
         level: (v) => { levelRef.current = v; },
         speechStart: (barge) => {
+          bargedRef.current = barge;
           if (barge) { speakGen.current++; sp.current.stop(); react('curious'); }
           setPartial('');
           setT('user');
@@ -98,7 +100,8 @@ export function CallMode({ avatar, state, lang, t, reducedMotion, speech, lastRe
         blip: () => { if (turnRef.current === 'user') setT('listening'); },
         utterance: (text) => {
           setPartial('');
-          if (!text) { void say(t.callDidntCatch); return; }
+          // An interruption with no words was most likely noise or echo: just listen, don't nag.
+          if (!text) { if (bargedRef.current) setT('listening'); else void say(t.callDidntCatch); return; }
           setYouSaid(text);
           react(reactionForUser(text));
           fillers.current = 0;
