@@ -3,11 +3,14 @@
 #  - Android: installable .apk (signed with the build's own key)
 #  - iOS: unsigned .ipa (sideload with AltStore/Sideloadly, or re-sign with your Apple account)
 # The release is only created when every build succeeded.
+# Ways to release: push a tag "vX.Y.Z", or push a commit whose message contains "[release]" (the version then comes
+# from apps/desktop/package.json and the release job creates the tag), or run the workflow manually.
 name: Release
 
 on:
   push:
     tags: ['v*']
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -21,8 +24,23 @@ env:
   NODE_VERSION: '22'
 
 jobs:
+  version:
+    name: Decide version
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then V="${GITHUB_REF_NAME#v}"; else V=$(node -p "require('./apps/desktop/package.json').version"); fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$V"
+
   desktop:
     name: Desktop (${{ matrix.name }})
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -41,10 +59,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-      - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Set version
         shell: bash
-        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+        run: npm version --no-git-tag-version --allow-same-version "${{ needs.version.outputs.version }}"
       - run: npm ci
       - name: Build
         run: npx electron-builder ${{ matrix.target }} --publish never
@@ -65,6 +82,7 @@ jobs:
 
   android:
     name: Android (APK)
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +108,7 @@ jobs:
           NODE_ENV: production
       - name: Collect
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || VERSION=dev
+          VERSION="${{ needs.version.outputs.version }}"
           mkdir -p out
           cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "out/FreeMuse-${VERSION}-android.apk"
       - uses: actions/upload-artifact@v4
@@ -101,6 +119,7 @@ jobs:
 
   ios:
     name: iOS (unsigned IPA)
+    needs: version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +147,7 @@ jobs:
       - name: Package IPA
         working-directory: apps/mobile/ios
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || VERSION=dev
+          VERSION="${{ needs.version.outputs.version }}"
           mkdir -p Payload "$GITHUB_WORKSPACE/out"
           cp -R build/FreeMuse.xcarchive/Products/Applications/*.app Payload/
           zip -qry "$GITHUB_WORKSPACE/out/FreeMuse-${VERSION}-ios-unsigned.ipa" Payload
@@ -140,8 +159,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [desktop, android, ios]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, desktop, android, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -154,10 +172,11 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.version.outputs.version }}
         run: |
-          TITLE="Free Muse ${GITHUB_REF_NAME}"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" artifacts/* --title "$TITLE" --notes-file .github/release-notes.md --target "$GITHUB_SHA"
+            # Creates the tag at this commit if it doesn't exist yet.
+            gh release create "$TAG" artifacts/* --title "Free Muse $TAG" --notes-file .github/release-notes.md --target "$GITHUB_SHA" --latest
           fi
