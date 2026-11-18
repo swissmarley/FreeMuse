@@ -22,3 +22,9 @@ export function hostMatches(host: string, patterns: string[]): boolean {
     return q && (h === q || h.endsWith('.' + q));
   });
 }
+
+import { createHmac } from 'node:crypto';
+/** Per-user credential for the Sentinel egress proxy (HMAC so the proxy needs no lookup table). */
+export function proxyToken(secret: string, userId: string): string {
+  return createHmac('sha256', secret).update('egress:' + userId).digest('hex');
+}

@@ -5,7 +5,7 @@
  * reads/navigation → allow; drafts → allow when the user enabled auto-drafts.
  */
 import type { ActionClass, Decision, UserSettings } from '@muse/core';
-import { type ActionRequest, domainsIn, emailsIn, findOperation, hostMatches } from '@muse/security';
+import { type ActionRequest, detectInjection, domainsIn, emailsIn, findOperation, hostMatches } from '@muse/security';
 
 export interface PolicyContext {
   settings: Pick<UserSettings, 'allowedDomains' | 'blockedDomains' | 'autoApproveDrafts'>;
@@ -53,24 +53,37 @@ export function evaluatePolicy(a: ActionRequest, ctx: PolicyContext): PolicyResu
     return { decision: 'deny', reasons: [`${host} is on your blocked list`], risk: 'high', needsReview: false, exfiltration: false };
   }
 
-  // Exfiltration: a recipient or destination that appears in untrusted content but never in the user's own words.
+  // Recipients/destinations that came from untrusted content, not the user's own words.
+  //  - if the surrounding untrusted text shows injection signals → treat as exfiltration and deny;
+  //  - otherwise (e.g. replying to the host who emailed you) → the user must confirm, flagged high risk.
   const tainted = a.provenance.taintSources.length > 0;
   const userText = a.provenance.userRequest.toLowerCase();
   const untrusted = (a.provenance.untrustedText ?? '').toLowerCase();
   let exfiltration = false;
-  const rcpts = recipients(a.payload);
+  let fromUntrusted = false;
+  const around = (needle: string) => {
+    const out: string[] = [];
+    for (let i = untrusted.indexOf(needle); i >= 0 && out.length < 5; i = untrusted.indexOf(needle, i + 1)) out.push(untrusted.slice(Math.max(0, i - 700), i + 700));
+    return out.join('\n');
+  };
   const untrustedEmails = new Set(emailsIn(untrusted));
-  for (const r of rcpts) {
-    if (untrustedEmails.has(r) && !userText.includes(r)) {
+  for (const r of recipients(a.payload)) {
+    if (!untrustedEmails.has(r) || userText.includes(r)) continue;
+    const flags = detectInjection(around(r));
+    if (flags.length) {
       exfiltration = true;
-      reasons.push(`Recipient ${r} came from untrusted content, not from you`);
+      reasons.push(`Recipient ${r} was planted by content that ${flags[0]}`);
+    } else {
+      fromUntrusted = true;
+      reasons.push(`Recipient ${r} was found in an email or web page, not typed by you; check it is right`);
     }
   }
   if (host && domainsIn(untrusted).includes(host) && !userText.includes(host) && ['send', 'spend', 'login'].includes(a.actionClass)) {
-    exfiltration = true;
-    reasons.push(`Destination ${host} came from untrusted content, not from you`);
+    const flags = detectInjection(around(host));
+    if (flags.length) { exfiltration = true; reasons.push(`Destination ${host} was planted by content that ${flags[0]}`); }
+    else { fromUntrusted = true; reasons.push(`Destination ${host} came from a web page or email, not from you`); }
   }
-  if (exfiltration && ['send', 'spend', 'login', 'write'].includes(a.actionClass)) {
+  if (exfiltration && ['send', 'spend', 'login', 'write', 'draft'].includes(a.actionClass)) {
     return { decision: 'deny', reasons, risk: 'high', needsReview: false, exfiltration };
   }
 
@@ -83,7 +96,7 @@ export function evaluatePolicy(a: ActionRequest, ctx: PolicyContext): PolicyResu
   if (MANDATORY_ASK.includes(a.actionClass)) {
     reasons.push(`${op.label} always needs your approval`);
     if (tainted) reasons.push('This task read content from the web or email; double-check the details');
-    const risk = a.actionClass === 'spend' || tainted ? 'high' : 'medium';
+    const risk = a.actionClass === 'spend' || tainted || fromUntrusted ? 'high' : 'medium';
     return { decision: 'ask', reasons, risk, needsReview: true, exfiltration };
   }
 

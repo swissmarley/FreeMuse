@@ -12,6 +12,8 @@ export interface ClientOptions {
   getToken?: () => string | null | Promise<string | null>;
   /** Web uses an httpOnly cookie; mobile sends a bearer token. */
   credentials?: 'include' | 'omit';
+  /** Sent as x-muse-client (CSRF guard for cookie sessions). */
+  clientName?: string;
 }
 
 export class ApiError extends Error {
@@ -33,7 +35,7 @@ export class MuseClient {
   constructor(private opts: ClientOptions) {}
 
   private async headers(json = true): Promise<Record<string, string>> {
-    const h: Record<string, string> = {};
+    const h: Record<string, string> = { 'x-muse-client': this.opts.clientName ?? 'web' };
     if (json) h['content-type'] = 'application/json';
     const tok = await this.opts.getToken?.();
     if (tok) h.authorization = `Bearer ${tok}`;

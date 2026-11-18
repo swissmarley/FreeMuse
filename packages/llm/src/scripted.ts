@@ -13,7 +13,7 @@ export class ScriptedProvider implements LLMProvider {
 
   async respond(req: LLMRequest, h: StreamHandlers = {}): Promise<LLMResult> {
     this.requests.push(req);
-    const lastUser = [...req.input].reverse().find((i) => i.type === 'message' && i.role === 'user') as Extract<Item, { type: 'message' }> | undefined;
+    const lastUser = [...req.input].reverse().find((i) => i.type === 'message' && (i.role === 'user' || i.role === 'developer')) as Extract<Item, { type: 'message' }> | undefined;
     const lastUserText = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : lastUser.content.map((c) => ('text' in c ? c.text : '')).join('')) : '';
     // tool outputs produced since the last user message
     const idx = lastUser ? req.input.lastIndexOf(lastUser) : -1;

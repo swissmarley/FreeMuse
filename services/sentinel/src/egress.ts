@@ -3,11 +3,12 @@
  * Authenticates each sandbox (HMAC token per user), blocks private/link-local ranges (SSRF) and blocked domains,
  * pins the resolved IP (no DNS rebinding between check and connect) and logs hosts to egress_log.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import net from 'node:net';
-import { hostMatches, isPrivateAddress } from '@muse/security';
+import { hostMatches, isPrivateAddress, proxyToken } from '@muse/security';
+export { proxyToken };
 
 export interface EgressOptions {
   secret: string;
@@ -18,10 +19,6 @@ export interface EgressOptions {
   log: (userId: string, host: string, allowed: boolean, reason: string) => void;
   /** Optional upstream proxy (http://host:port) for environments that require one. */
   upstream?: string;
-}
-
-export function proxyToken(secret: string, userId: string): string {
-  return createHmac('sha256', secret).update('egress:' + userId).digest('hex');
 }
 
 function authUser(secret: string, header: string | undefined): string | null {
