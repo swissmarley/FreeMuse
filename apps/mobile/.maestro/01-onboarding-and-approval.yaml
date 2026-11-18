@@ -1,0 +1,28 @@
+# Maestro flow (run on a simulator/emulator with the stack running: `pnpm --filter @muse/mobile e2e`)
+appId: local.personal.museclone
+---
+- launchApp: { clearState: true }
+- tapOn: "Let's start"
+- tapOn: "Date of birth (YYYY-MM-DD)"
+- inputText: "1990-05-20"
+- tapOn: "Continue"
+- tapOn: "Email"
+- inputRandomEmail
+- tapOn: "Password (10+ characters)"
+- inputText: "correct horse battery staple"
+- tapOn: "Create account"
+- assertVisible: "What should you call me?"
+- tapOn: "Start chatting"
+- assertVisible: "You are chatting with an AI agent.*"
+- tapOn: "More"
+- tapOn: "Connections & permissions"
+- tapOn: { text: "Connect", index: 3 }
+- back
+- tapOn: "Chat"
+- tapOn: "Message Jolly…"
+- inputText: "Plan my trip to Lisbon and draft the email to my host about my arrival."
+- tapOn: "Send"
+- extendedWaitUntil: { visible: ".*Approvals.*", timeout: 120000 }
+- tapOn: "Approvals"
+- tapOn: "Approve"
+- assertNotVisible: "Approve"
