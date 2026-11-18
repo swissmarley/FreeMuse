@@ -20,7 +20,7 @@ export const QUEUES = { turns: 'turns', tasks: 'tasks', memory: 'memory' } as co
 
 export interface TurnJob { userId: string; conversationId: string; turnId: string; kind: 'chat' | 'resume'; text?: string; note?: string; attachments?: { fileId: string }[] }
 export interface TaskJob { userId: string; taskId: string; reason: 'start' | 'scheduled' | 'resume'; note?: string }
-export interface MemoryJob { userId: string; kind: 'extract' | 'reflect' | 'proactive' }
+export interface MemoryJob { userId: string; kind: 'extract' | 'reflect' | 'proactive' | 'embed'; memoryId?: string; conversationId?: string }
 
 export class Bus {
   readonly pub: Redis;
