@@ -66,16 +66,17 @@ export function chatRoutes(app: FastifyInstance, d: Deps) {
 
   app.post('/v1/conversations/:cid/messages', { ...auth, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { cid } = req.params as { cid: string };
-    const body = (req.body ?? {}) as { text?: string; attachments?: { fileId: string }[] };
+    const body = (req.body ?? {}) as { text?: string; attachments?: { fileId: string }[]; channel?: string };
     const text = String(body.text ?? '').trim();
     if (!text || text.length > 20_000) return reply.code(400).send({ code: 'invalid', message: 'Message must be 1-20000 characters' });
     const userId = req.user!.id;
     const attachments = (body.attachments ?? []).slice(0, 5).filter((a) => typeof a.fileId === 'string');
-    const message = await insertMessage(d.db, { userId, conversationId: cid, role: 'user', text, meta: attachments.length ? { attachments } : {} });
+    const channel = body.channel === 'voice' ? 'voice' : 'text';
+    const message = await insertMessage(d.db, { userId, conversationId: cid, role: 'user', text, meta: { ...(attachments.length ? { attachments } : {}), ...(channel === 'voice' ? { channel } : {}) } });
     await d.bus.emit(userId, { type: 'message.created', message });
     const turnId = randomUUID();
     await d.db.tx((c) => appendAudit(c, { userId, kind: 'chat.user', actor: 'user', summary: text.slice(0, 140) }));
-    await d.bus.queues.turns.add('chat', { userId, conversationId: cid, turnId, kind: 'chat', text, attachments }, { jobId: turnId });
+    await d.bus.queues.turns.add('chat', { userId, conversationId: cid, turnId, kind: 'chat', text, attachments, channel }, { jobId: turnId });
     return { message, turnId };
   });
 

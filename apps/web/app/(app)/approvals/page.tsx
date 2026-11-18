@@ -1,15 +1,17 @@
 'use client';
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import type { Approval } from '@muse/core';
-import { strings } from '@muse/core/i18n';
+import { fmt, strings, type Strings } from '@muse/core/i18n';
 import { api } from '../../../lib/api';
 import { useMuse } from '../../../lib/store';
 
-const CLASS_LABEL: Record<string, string> = { send: 'Send', spend: 'Purchase', write: 'Calendar', login: 'Sign in', draft: 'Draft', read: 'Read', navigate: 'Browse' };
+const CLASS_LABEL: Record<string, keyof Strings> = { send: 'classSend', spend: 'classSpend', write: 'classWrite', login: 'classLogin', draft: 'classDraft', read: 'classRead', navigate: 'classNavigate' };
+const RISK: Record<string, keyof Strings> = { low: 'riskLow', medium: 'riskMedium', high: 'riskHigh' };
 const EDITABLE = ['to', 'cc', 'subject', 'body', 'title', 'start', 'end', 'location', 'notes', 'attendees'];
 
 function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
-  const { toast, refreshCounts } = useMuse();
+  const { s, toast, refreshCounts } = useMuse();
+  const t = strings(s.me!.settings.language);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -25,7 +27,7 @@ function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
       }
       const r = await api.resolveApproval(a.id, decision, edited);
       if (decision === 'approve') navigator.vibrate?.([12, 40, 18]); // haptic confirmation where supported
-      toast(decision === 'approve' ? (r.approval.status === 'executed' ? 'Approved and done ✓' : `Approved, but it failed: ${(r.approval as any).result?.error ?? ''}`) : 'Declined');
+      toast(decision === 'approve' ? (r.approval.status === 'executed' ? t.approvedDone : fmt(t.approvedFailed, { error: (r.approval as any).result?.error ?? '' })) : t.declined);
       await refreshCounts();
       onDone();
     } catch (e) {
@@ -39,8 +41,8 @@ function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
   return (
     <article className={`card pop risk-${a.risk.level}`} aria-labelledby={`ap-${a.id}`}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <span className="chip">{CLASS_LABEL[a.actionClass] ?? a.actionClass} · {a.connector.replace('_', ' ')}</span>
-        <span className={`chip ${a.risk.level === 'high' ? 'bad' : a.risk.level === 'medium' ? 'warn' : 'ok'}`}>Risk: {a.risk.level}</span>
+        <span className="chip">{CLASS_LABEL[a.actionClass] ? t[CLASS_LABEL[a.actionClass]!] : a.actionClass} · {a.connector.replace('_', ' ')}</span>
+        <span className={`chip ${a.risk.level === 'high' ? 'bad' : a.risk.level === 'medium' ? 'warn' : 'ok'}`}>{fmt(t.risk, { level: RISK[a.risk.level] ? t[RISK[a.risk.level]!] : a.risk.level })}</span>
       </div>
       <h2 id={`ap-${a.id}`} style={{ fontSize: '1.1rem', margin: '12px 0' }}>{a.title}</h2>
       {editing ? (
@@ -52,7 +54,7 @@ function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
                 : <input className="input" defaultValue={show(a.payload[k])} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} />}
             </label>
           ))}
-          <p className="muted" style={{ fontSize: '.85rem' }}>Edited actions are checked again by Sentinel before they run.</p>
+          <p className="muted" style={{ fontSize: '.85rem' }}>{t.editedRecheck}</p>
         </div>
       ) : (
         <dl className="kv">
@@ -60,15 +62,15 @@ function ApprovalCard({ a, onDone }: { a: Approval; onDone: () => void }) {
         </dl>
       )}
       {a.risk.reasons.length > 0 && (
-        <ul className="muted" style={{ fontSize: '.85rem', margin: '12px 0 0', paddingLeft: 18 }} aria-label="Why this needs approval">
+        <ul className="muted" style={{ fontSize: '.85rem', margin: '12px 0 0', paddingLeft: 18 }} aria-label={t.whyApproval}>
           {a.risk.reasons.map((r) => <li key={r}>{r}</li>)}
         </ul>
       )}
       {a.status === 'pending' ? (
         <div className="row" style={{ marginTop: 16 }}>
-          <button className="btn" disabled={busy} onClick={() => void decide('approve')}>{editing ? 'Approve edited' : 'Approve'}</button>
-          {editable.length > 0 && <button className="btn secondary" disabled={busy} onClick={() => setEditing((x) => !x)}>{editing ? 'Cancel edit' : 'Edit'}</button>}
-          <button className="btn ghost" disabled={busy} onClick={() => void decide('reject')}>Reject</button>
+          <button className="btn" disabled={busy} onClick={() => void decide('approve')}>{editing ? t.approveEdited : t.approve}</button>
+          {editable.length > 0 && <button className="btn secondary" disabled={busy} onClick={() => setEditing((x) => !x)}>{editing ? t.cancelEdit : t.edit}</button>}
+          <button className="btn ghost" disabled={busy} onClick={() => void decide('reject')}>{t.reject}</button>
         </div>
       ) : <p className="chip" style={{ marginTop: 12 }}>{a.status}</p>}
     </article>
@@ -85,13 +87,13 @@ export default function ApprovalsPage() {
   return (
     <main className="page">
       <h1>{t.approvals}</h1>
-      <p className="lead">Anything sensitive waits here for you. Nothing is sent, bought or submitted until you approve.</p>
+      <p className="lead">{t.approvalsLead}</p>
       <div className="row" role="tablist" style={{ marginBottom: 16 }}>
-        <button role="tab" aria-selected={tab === 'pending'} className={`btn ${tab === 'pending' ? '' : 'secondary'}`} onClick={() => setTab('pending')}>Waiting</button>
-        <button role="tab" aria-selected={tab === 'all'} className={`btn ${tab === 'all' ? '' : 'secondary'}`} onClick={() => setTab('all')}>History</button>
+        <button role="tab" aria-selected={tab === 'pending'} className={`btn ${tab === 'pending' ? '' : 'secondary'}`} onClick={() => setTab('pending')}>{t.waiting}</button>
+        <button role="tab" aria-selected={tab === 'all'} className={`btn ${tab === 'all' ? '' : 'secondary'}`} onClick={() => setTab('all')}>{t.history}</button>
       </div>
       <div className="stack">
-        {items === null ? <p className="muted">Loading…</p> : items.length === 0 ? <p className="empty">{t.nothingPending}</p> : items.map((a) => <ApprovalCard key={a.id} a={a} onDone={() => void load()} />)}
+        {items === null ? <p className="muted">{t.loading}</p> : items.length === 0 ? <p className="empty">{t.nothingPending}</p> : items.map((a) => <ApprovalCard key={a.id} a={a} onDone={() => void load()} />)}
       </div>
     </main>
   );

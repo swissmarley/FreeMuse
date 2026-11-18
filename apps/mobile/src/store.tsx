@@ -1,6 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, type ReactNode } from 'react';
 import type { ChatMessage, Me, StreamEvent } from '@muse/core';
-import { api, getToken, setToken } from './api';
+import { api, getToken, loadServerUrl, setToken } from './api';
+
+/** Point the client at the saved server address once, before the first request. */
+let serverReady: Promise<unknown> | null = null;
+const ensureServer = () => (serverReady ??= loadServerUrl().catch(() => api.baseUrl));
 
 export interface Activity { callId: string; label: string; done: boolean; ok: boolean }
 
@@ -44,12 +48,13 @@ export function reducer(s: State, a: Action): State {
   }
 }
 
-interface Ctx { s: State; refreshMe(): Promise<void>; send(text: string, attachments?: { fileId: string }[]): Promise<void>; refreshCounts(): Promise<void>; signIn(token: string): Promise<void>; signOut(): Promise<void> }
+interface Ctx { s: State; refreshMe(): Promise<void>; send(text: string, attachments?: { fileId: string }[], channel?: 'text' | 'voice'): Promise<void>; refreshCounts(): Promise<void>; signIn(token: string): Promise<void>; signOut(): Promise<void> }
 const C = createContext<Ctx | null>(null);
 
 export function MuseProvider({ children }: { children: ReactNode }) {
   const [s, dispatch] = useReducer(reducer, initial);
   const refreshMe = useCallback(async () => {
+    await ensureServer();
     if (!(await getToken())) return dispatch({ t: 'me', me: null });
     try { dispatch({ t: 'me', me: await api.me() }); } catch { dispatch({ t: 'me', me: null }); }
   }, []);
@@ -67,8 +72,8 @@ export function MuseProvider({ children }: { children: ReactNode }) {
     void refreshCounts();
     return api.stream((e) => { dispatch({ t: 'event', e }); if (e.type === 'task.updated') void refreshCounts(); });
   }, [meId, refreshCounts]);
-  const send = useCallback(async (text: string, attachments: { fileId: string }[] = []) => {
-    const r = await api.send(text, 'default', attachments);
+  const send = useCallback(async (text: string, attachments: { fileId: string }[] = [], channel: 'text' | 'voice' = 'text') => {
+    const r = await api.send(text, 'default', attachments, channel);
     dispatch({ t: 'sent', message: r.message });
   }, []);
   const signIn = useCallback(async (token: string) => { await setToken(token); await refreshMe(); }, [refreshMe]);

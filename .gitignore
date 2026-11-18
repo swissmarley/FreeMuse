@@ -15,3 +15,4 @@ apps/mobile/ios/
 *.tsbuildinfo
 .next-e2e/
 .expo-export/
+dump.rdb

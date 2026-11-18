@@ -13,7 +13,7 @@ export async function handleTurn(d: AgentDeps, job: TurnJob): Promise<void> {
     if (!u) return; // user deleted
     const history = (await loadItems(d.db, job.userId, thread)).map((r) => r.item as Item);
     const lastUserText = job.kind === 'chat' ? job.text ?? '' : await lastUserMessage(d, job.userId, job.conversationId);
-    const instructions = await buildInstructions(d, job.userId, u, lastUserText);
+    const instructions = await buildInstructions(d, job.userId, u, lastUserText, job.channel === 'voice' ? 'voice' : 'text');
     const first: Item = job.kind === 'chat'
       ? await userItem(d, job.userId, job.text ?? '', job.attachments)
       : { type: 'message', role: 'developer', content: `[Update from the system, not from the user] ${job.note ?? ''}` };

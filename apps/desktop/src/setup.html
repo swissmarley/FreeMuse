@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Free Muse</title>
+<style>
+  :root { --bg: #FBF3E6; --surface: #fff; --text: #3A2A1B; --muted: #7A6656; --accent: #6B4E31; --border: #E8DCC8; --danger: #C9465A; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1C1612; --surface: #27201A; --text: #F3E7D3; --muted: #B7A58F; --accent: #E2B97F; --border: #3A2F26; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; }
+  .card { width: min(460px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 28px; box-shadow: 0 10px 30px rgba(60, 40, 20, .08); }
+  h1 { margin: 12px 0 4px; font-size: 1.4rem; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  label { display: block; font-weight: 700; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 1rem; }
+  input:focus-visible, button:focus-visible { outline: 3px solid #8DB7D9; outline-offset: 2px; }
+  button { margin-top: 14px; width: 100%; padding: 12px 18px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 800; font-size: 1rem; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .err { color: var(--danger); margin-top: 12px; min-height: 1.5em; }
+  .hint { font-size: .85rem; margin-top: 16px; }
+  code { background: var(--bg); padding: 1px 6px; border-radius: 6px; }
+  .logo { width: 72px; height: 72px; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="../build/icon.png" alt="" />
+    <h1>Connect to your Free Muse</h1>
+    <p>Free Muse runs on your own computer or server. Enter the address of its web app.</p>
+    <form id="f">
+      <label for="server">Server address</label>
+      <input id="server" name="server" autocomplete="url" spellcheck="false" placeholder="http://localhost:3000" required />
+      <button id="go" type="submit">Connect</button>
+      <div class="err" id="err" role="alert"></div>
+    </form>
+    <p class="hint">Not running yet? On the server: <code>cp .env.example .env</code>, add your <code>MODEL_API_KEY</code>, then <code>docker compose up</code>. The web app is on port 3000. Change the server any time with Ctrl/⌘ + ,</p>
+  </main>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const input = document.getElementById('server');
+    const err = document.getElementById('err');
+    const go = document.getElementById('go');
+    input.value = q.get('server') || 'http://localhost:3000';
+    err.textContent = q.get('error') || '';
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      go.textContent = 'Connecting…';
+      err.textContent = '';
+      const r = await window.freemuseDesktop.connect(input.value);
+      if (!r.ok) { err.textContent = r.error; go.disabled = false; go.textContent = 'Connect'; }
+    });
+  </script>
+</body>
+</html>

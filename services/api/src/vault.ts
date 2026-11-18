@@ -9,6 +9,8 @@ import sodium from 'libsodium-wrappers';
 import type { Db } from '@muse/db';
 
 export type VaultSecret = Record<string, unknown>;
+/** apikey: the user's own third-party API keys (e.g. ElevenLabs). */
+export type VaultKind = 'login' | 'oauth' | 'payment' | 'apikey';
 
 export class Vault {
   private ready = sodium.ready;
@@ -22,7 +24,7 @@ export class Vault {
     return sodium.crypto_generichash(32, sodium.from_string(`${userId}|${service}`), Buffer.from(this.masterKeyB64, 'base64'));
   }
 
-  async put(userId: string, kind: 'login' | 'oauth' | 'payment', service: string, username: string, secret: VaultSecret): Promise<string> {
+  async put(userId: string, kind: VaultKind, service: string, username: string, secret: VaultSecret): Promise<string> {
     await this.ready;
     const dek = sodium.crypto_secretbox_keygen();
     const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
@@ -59,7 +61,7 @@ export class Vault {
   }
 
   /** Id of the user's item of this kind for a service (newest first), if any. */
-  async findId(userId: string, kind: 'login' | 'oauth' | 'payment', service: string): Promise<string | null> {
+  async findId(userId: string, kind: VaultKind, service: string): Promise<string | null> {
     const r = await this.db.one('SELECT id FROM vault_items WHERE user_id=$1 AND kind=$2 AND service=$3 ORDER BY created_at DESC LIMIT 1', [userId, kind, service]);
     return r?.id ?? null;
   }

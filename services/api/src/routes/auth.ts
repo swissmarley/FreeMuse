@@ -12,7 +12,7 @@ export function authRoutes(app: FastifyInstance, d: Deps) {
   app.post('/v1/auth/signup', limit, async (req, reply) => {
     const parsed = SignupInput.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: 'invalid', message: parsed.error.issues[0]?.message ?? 'Invalid input' });
-    const { email, password, birthDate } = parsed.data;
+    const { email, password, birthDate, language } = parsed.data;
     const age = ageOn(birthDate);
     if (age < MIN_AGE || age > 120) return reply.code(403).send({ code: 'age_gate', message: `You must be at least ${MIN_AGE} to use this app.` });
     const exists = await d.db.one('SELECT 1 FROM users WHERE email=$1', [email]);
@@ -21,7 +21,7 @@ export function authRoutes(app: FastifyInstance, d: Deps) {
     // Data minimisation: only the birth year is stored, plus the verification time.
     const u = await d.db.one(
       'INSERT INTO users(email, password_hash, birth_year, age_verified_at, settings, avatar) VALUES ($1,$2,$3,now(),$4,$5) RETURNING id',
-      [email, hash, Number(birthDate.slice(0, 4)), DEFAULT_SETTINGS, DEFAULT_AVATAR],
+      [email, hash, Number(birthDate.slice(0, 4)), { ...DEFAULT_SETTINGS, language: language ?? DEFAULT_SETTINGS.language }, DEFAULT_AVATAR],
     );
     await d.db.tx((c) => appendAudit(c, { userId: u.id, kind: 'account.created', actor: 'user', summary: 'Account created (age verified 18+)' }));
     const token = await createSession(d.db, d.cfg.jwtSecret, u.id);

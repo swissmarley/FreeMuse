@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { ChatMessage, Me, StreamEvent } from '@muse/core';
+import { fmt as format, strings } from '@muse/core/i18n';
 import { api } from './api';
 
 export interface Activity { callId: string; label: string; done: boolean; ok: boolean; summary?: string }
@@ -68,7 +69,7 @@ function reducer(s: State, a: Action): State {
 interface Ctx {
   s: State;
   refreshMe(): Promise<void>;
-  send(text: string, attachments?: { fileId: string }[]): Promise<void>;
+  send(text: string, attachments?: { fileId: string }[], channel?: 'text' | 'voice'): Promise<void>;
   refreshCounts(): Promise<void>;
   toast(text: string, href?: string): void;
 }
@@ -97,6 +98,8 @@ export function MuseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { void refreshMe(); }, [refreshMe]);
+  const langRef = useRef('en');
+  langRef.current = s.me?.settings.language ?? 'en';
 
   const meId = s.me?.id;
   useEffect(() => {
@@ -105,15 +108,16 @@ export function MuseProvider({ children }: { children: ReactNode }) {
     void refreshCounts();
     const stop = api.stream((e) => {
       dispatch({ t: 'event', e });
-      if (e.type === 'approval.created') toast(`Needs your OK: ${e.title}`, '/approvals');
+      const t = strings(langRef.current);
+      if (e.type === 'approval.created') toast(format(t.needsYourOk, { title: e.title }), '/approvals');
       if (e.type === 'task.updated') void refreshCounts();
-      if (e.type === 'message.created' && e.message.role === 'proactive') toast('New suggestion', '/');
+      if (e.type === 'message.created' && e.message.role === 'proactive') toast(t.newSuggestion, '/');
     }, (st) => dispatch({ t: 'online', v: st === 'open' }));
     return stop;
   }, [meId, refreshCounts, toast]);
 
-  const send = useCallback(async (text: string, attachments: { fileId: string }[] = []) => {
-    const r = await api.send(text, 'default', attachments);
+  const send = useCallback(async (text: string, attachments: { fileId: string }[] = [], channel: 'text' | 'voice' = 'text') => {
+    const r = await api.send(text, 'default', attachments, channel);
     dispatch({ t: 'sent', message: r.message });
   }, []);
 
@@ -128,6 +132,4 @@ export function useMuse(): Ctx {
 }
 
 /** Strings helper with {name} interpolation. */
-export function fmt(s: string, vars: Record<string, string>) {
-  return s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
-}
+export const fmt = format;

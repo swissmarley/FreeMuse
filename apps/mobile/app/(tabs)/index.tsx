@@ -5,14 +5,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { type Reaction, reactionForReply, resolveAvatarState, tapReaction } from '@muse/core/avatar';
-import { strings } from '@muse/core/i18n';
+import { fmt, strings } from '@muse/core/i18n';
 import { api } from '../../src/api';
 import { Avatar } from '../../src/Avatar';
 import { useMuse } from '../../src/store';
 import { useTheme } from '../../src/theme';
 import { Disclosure } from '../../src/ui';
 import { useListener, useSpeech } from '../../src/voice';
-import { VoiceMode } from '../../src/VoiceMode';
+import { CallMode } from '../../src/CallMode';
 
 export default function Chat() {
   const { s, send } = useMuse();
@@ -28,18 +28,12 @@ export default function Chat() {
   const speech = useSpeech(me.avatar.voice, me.settings.language);
   const listener = useListener(me.settings.language);
   const listRef = useRef<FlatList>(null);
-  const spoken = useRef<string | null>(null);
   const [reaction, setReaction] = useState<{ kind: Reaction; at: number } | null>(null);
   const taps = useRef(0);
   const reacted = useRef<string | null>(null);
 
   useEffect(() => { const a = setTimeout(() => setGreeting(false), 2600); const b = setInterval(() => setNow(Date.now()), 5000); return () => { clearTimeout(a); clearInterval(b); }; }, []);
   const last = s.messages.at(-1);
-  useEffect(() => {
-    if (!voiceMode || !last || last.role === 'user' || spoken.current === last.id) return;
-    spoken.current = last.id;
-    speech.speak(last.text);
-  }, [voiceMode, last, speech]);
 
   useEffect(() => {
     if (!last || last.role === 'user' || reacted.current === last.id) return;
@@ -47,11 +41,12 @@ export default function Chat() {
     reacted.current = last.id;
     if (!first && !voiceMode) setReaction({ kind: reactionForReply(last.text), at: Date.now() });
   }, [last, voiceMode]);
-  const openVoice = () => { spoken.current = s.messages.at(-1)?.id ?? null; setVoiceMode(true); };
+  const openVoice = () => { speech.stop(); setVoiceMode(true); };
 
   const state = resolveAvatarState({ greeting, thinking: s.thinking, speaking: speech.speaking, justCompleted: now - s.completedAt < 3000, tasksRunning: s.tasksRunning, idleMs: 0 });
-  const submit = async (v = text) => {
+  const submit = async (v = text, channel: 'text' | 'voice' = 'text') => {
     if (!v.trim()) return;
+    if (channel === 'voice') { await send(v.trim(), [], 'voice'); return; }
     await send(v.trim(), files.map((f) => ({ fileId: f.fileId })));
     setText('');
     setFiles([]);
@@ -74,18 +69,19 @@ export default function Chat() {
           reaction={reaction} onTap={() => setReaction({ kind: tapReaction(taps.current++).kind, at: Date.now() })} />
         <View style={{ flex: 1 }}>
           <Text accessibilityRole="header" style={{ fontSize: 18, fontWeight: '800', color: th.text }}>{me.avatar.name}</Text>
-          <Text style={{ color: th.textMuted, fontSize: 13 }}>{s.thinking ? 'Thinking…' : s.tasksRunning ? `Working on ${s.tasksRunning} task(s)` : 'Here for you'}</Text>
+          <Text style={{ color: th.textMuted, fontSize: 13 }}>{s.thinking ? t.statusThinking : s.tasksRunning ? fmt(t.statusWorking, { count: s.tasksRunning }) : t.statusHere}</Text>
         </View>
-        {s.pendingApprovals > 0 && <Pressable accessibilityRole="button" onPress={() => router.push('/approvals')}><Text style={{ color: th.warning, fontWeight: '800' }}>{s.pendingApprovals} to approve</Text></Pressable>}
-        <Pressable accessibilityRole="button" accessibilityLabel="Voice mode" onPress={openVoice} style={{ padding: 8 }}><Text style={{ fontSize: 20 }}>🎙</Text></Pressable>
+        {s.pendingApprovals > 0 && <Pressable accessibilityRole="button" onPress={() => router.push('/approvals')}><Text style={{ color: th.warning, fontWeight: '800' }}>{fmt(t.waitingForOk, { count: s.pendingApprovals })}</Text></Pressable>}
+        <Pressable accessibilityRole="button" accessibilityLabel={fmt(t.callName, { name: me.avatar.name })} onPress={openVoice}
+          style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: '#3FA35B' }}><Text style={{ fontSize: 15, color: '#fff', fontWeight: '800' }}>📞 {t.call}</Text></Pressable>
       </View>
       <Disclosure />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <FlatList ref={listRef} data={data} keyExtractor={(m) => m.id} contentContainerStyle={{ padding: 12, gap: 10 }} onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-          accessibilityLabel="Messages"
+          accessibilityLabel={t.messages}
           renderItem={({ item }) => (
-            <View accessible accessibilityLabel={`${item.role === 'user' ? 'You' : me.avatar.name}: ${item.text}`} style={{ alignSelf: item.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '86%', padding: 12, borderRadius: 22, backgroundColor: item.role === 'user' ? th.userBubble : th.agentBubble, borderWidth: item.role === 'proactive' ? 1 : 0, borderColor: th.border }}>
-              {item.role === 'proactive' && <Text style={{ fontSize: 12, fontWeight: '800', color: th.textMuted }}>💡 Suggestion</Text>}
+            <View accessible accessibilityLabel={`${item.role === 'user' ? t.youSaid : fmt(t.nameSaid, { name: me.avatar.name })}: ${item.text}`} style={{ alignSelf: item.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '86%', padding: 12, borderRadius: 22, backgroundColor: item.role === 'user' ? th.userBubble : th.agentBubble, borderWidth: item.role === 'proactive' ? 1 : 0, borderColor: th.border }}>
+              {item.role === 'proactive' && <Text style={{ fontSize: 12, fontWeight: '800', color: th.textMuted }}>{t.suggestion}</Text>}
               <Text style={{ color: item.role === 'user' ? th.userBubbleText : th.text, fontSize: 16 }}>{item.text.replace(/\*\*/g, '')}</Text>
             </View>
           )}
@@ -93,7 +89,7 @@ export default function Chat() {
         />
         {files.length > 0 && <Text style={{ color: th.textMuted, paddingHorizontal: 12 }}>📎 {files.map((f) => f.name).join(', ')}</Text>}
         <View style={{ flexDirection: 'row', gap: 8, padding: 10, borderTopWidth: 1, borderTopColor: th.border, backgroundColor: th.surface, alignItems: 'flex-end' }}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Attach a file" onPress={() => void attach()} style={{ padding: 10 }}><Text style={{ fontSize: 20 }}>📎</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={t.attachFile} onPress={() => void attach()} style={{ padding: 10 }}><Text style={{ fontSize: 20 }}>📎</Text></Pressable>
           <TextInput accessibilityLabel={t.composerPlaceholder.replace('{name}', me.avatar.name)} value={listener.listening ? t.listening : text} onChangeText={setText} editable={!listener.listening} multiline
             placeholder={t.composerPlaceholder.replace('{name}', me.avatar.name)} placeholderTextColor={th.textMuted}
             style={{ flex: 1, maxHeight: 120, borderWidth: 1, borderColor: th.border, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, color: th.text, backgroundColor: th.bg }} />
@@ -102,18 +98,18 @@ export default function Chat() {
           <Pressable accessibilityRole="button" accessibilityLabel={t.send} onPress={() => void submit()} style={{ height: 46, paddingHorizontal: 16, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: th.accent }}><Text style={{ color: th.accentText, fontWeight: '800' }}>{t.send}</Text></Pressable>
         </View>
       </KeyboardAvoidingView>
-      <VoiceMode
+      <CallMode
         visible={voiceMode}
         avatar={me.avatar}
         state={state}
+        lang={me.settings.language}
+        t={t}
         reducedMotion={me.settings.reducedMotion}
         speech={speech}
-        listener={listener}
         lastReply={last && last.role !== 'user' ? { id: last.id, text: last.text } : null}
         streamingText={s.streaming?.text}
         thinking={s.thinking}
-        strings={{ listening: t.listening, holdToTalk: t.holdToTalk }}
-        onSay={(said) => submit(said)}
+        onSay={(said) => submit(said, 'voice')}
         onClose={() => setVoiceMode(false)}
       />
     </SafeAreaView>

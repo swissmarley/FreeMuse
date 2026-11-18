@@ -35,7 +35,7 @@ const deps: AgentDeps = {
   model: process.env.LLM_MODEL || 'muse-spark-1.3',
   effort: (process.env.LLM_EFFORT as AgentDeps['effort']) ?? 'high',
   webSearch: !scripted && (process.env.LLM_PROVIDER ?? 'responses') === 'responses',
-  allowContributorMode: process.env.ALLOW_CONTRIBUTOR_MODE === 'true',
+  allowContributorMode: process.env.ALLOW_CONTRIBUTOR_MODE !== 'false',
 };
 
 const connection = redisConnection();

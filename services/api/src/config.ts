@@ -23,6 +23,10 @@ export interface ApiConfig {
   /** provider: 'local' (natural Kokoro voices inside the API, default) | 'openai-compatible' | 'device' (on-device only). */
   tts: { provider: string; baseUrl?: string; apiKey?: string; model?: string; voice?: string; dtype?: string; cacheDir?: string; preload?: boolean };
   secureCookies: boolean;
+  /** Users may opt in to Contributor-mode models (ALLOW_CONTRIBUTOR_MODE, default true). */
+  allowContributorMode: boolean;
+  /** ElevenLabs API base (users bring their own key). */
+  elevenlabsBaseUrl: string;
 }
 
 const req = (n: string) => {
@@ -65,5 +69,7 @@ export function loadConfig(): ApiConfig {
       preload: process.env.TTS_PRELOAD !== 'false',
     },
     secureCookies: (process.env.API_PUBLIC_URL ?? '').startsWith('https://'),
+    allowContributorMode: process.env.ALLOW_CONTRIBUTOR_MODE !== 'false',
+    elevenlabsBaseUrl: (process.env.ELEVENLABS_BASE_URL || 'https://api.elevenlabs.io').replace(/\/$/, ''),
   };
 }

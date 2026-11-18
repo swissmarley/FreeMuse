@@ -40,15 +40,19 @@ export async function loadUser(d: AgentDeps, userId: string): Promise<UserCtx | 
   };
 }
 
-/** Standard-mode model unless the user opted IN to training and the operator allows Contributor mode. */
+/**
+ * Standard-mode model unless the user turned Contributor mode on (with recorded consent that Meta may use the content
+ * for training) and the operator allows it. Contributor-mode models cost less, so this saves tokens.
+ */
 export function modelFor(d: AgentDeps, settings: UserSettings): string {
-  if (!settings.trainingOptOut && d.allowContributorMode && /^muse-spark-1\.[23]$/.test(d.model)) return `${d.model}-contributor`;
+  const optedIn = settings.contributorMode === true && !!settings.contributorConsentAt;
+  if (optedIn && d.allowContributorMode && /^muse-spark-1\.[23]$/.test(d.model)) return `${d.model}-contributor`;
   return d.model;
 }
 
-export async function buildInstructions(d: AgentDeps, userId: string, u: UserCtx, query: string): Promise<string> {
+export async function buildInstructions(d: AgentDeps, userId: string, u: UserCtx, query: string, channel: 'text' | 'voice' = 'text'): Promise<string> {
   const mems = await retrieve(d, userId, query, 10).catch(() => []);
-  return orchestratorPrompt({ avatar: u.avatar, settings: u.settings, connections: u.connections, memories: mems.map((m) => m.content) });
+  return orchestratorPrompt({ avatar: u.avatar, settings: u.settings, connections: u.connections, memories: mems.map((m) => m.content), channel });
 }
 
 export function orchestratorTools(d: AgentDeps): Tool[] {

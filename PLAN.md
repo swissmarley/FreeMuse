@@ -98,14 +98,14 @@ i. customization polish + mobile.
 | 1Password integration | Built-in vault (libsodium secretbox, envelope encryption, master key from env/KMS). The model never sees secrets. |
 | Muse Confidential VM (user-held key) | Not implemented. The vault's KEK is server-side. Documented. |
 | WhatsApp channel, AI glasses, "Spaces" | Out of scope. |
-| Server-side TTS | Model API has none. Default is local neural TTS (Kokoro-82M via kokoro-js, inside the API), falling back to the best ranked on-device voice. Optional `TTS_PROVIDER=openai-compatible` or `device`. |
+| Server-side TTS | Model API has none. Optional ElevenLabs with the user's own key (every language). Default is local neural TTS (Kokoro-82M via kokoro-js, inside the API), falling back to the best ranked on-device voice. Optional `TTS_PROVIDER=openai-compatible` or `device`. |
 | Embeddings | Model API has none. `EMBEDDINGS_PROVIDER=hash` (local feature-hashing vectors in pgvector, plus Postgres full-text search hybrid) by default. Any OpenAI-compatible embeddings endpoint is configurable. |
 | Mascot "Jolly" artwork | An **original** stylised plush character (vector, drawn here, not traced from Meta art). If you drop your own artwork into `assets/avatar/`, it is used instead (`AVATAR_ASSET` in `packages/core/src/avatar/config.ts`). |
 | Computer-use (pixel) browsing | DOM/accessibility-snapshot browsing (more robust, cheaper, and works with muse-spark-1.3). |
 
 ## 5. EU / privacy
 Age gate (18+; only birth year and a verification timestamp are stored), AI disclosure on every screen, training/data
-opt-out (switches to Standard-mode model IDs; Contributor-mode IDs are never used), data export (JSON), delete
+opt-out by default (Standard-mode model IDs; Contributor-mode IDs only after the user's explicit, recorded consent), data export (JSON), delete
 everything, EU-region config (`DATA_REGION=eu`, compose runs everything locally), data minimisation, and
 PRIVACY.md.
 
@@ -121,6 +121,12 @@ PRIVACY.md.
 | g. memory + proactive | done | extraction / forget tests; reflection + proactive jobs (scheduled) |
 | h. voice | done | realtime STT proxy + file STT (Meta), natural local TTS (Kokoro) with lip-sync, interactive voice mode |
 | i. customisation + mobile | done | avatar customiser (web + mobile), Expo app type-checks and bundles for Android |
+
+| j. languages (en default, it, de, fr, es) | done | core i18n tests (every key, placeholders), web e2e switches to Italian and back |
+| k. voice calls (hands-free, VAD, barge-in) | done | core VAD tests, web e2e (ring → connect → mute → hang up), API test for voice-channel turns |
+| l. ElevenLabs voices (user's key) | done | API tests with a fake ElevenLabs server (key check, encrypted storage, language code, removal) |
+| m. Contributor mode (explicit consent) | done | API tests (consent required, forged timestamps ignored, audit), agent model-selection tests |
+| n. apps: desktop (Electron), Android, iOS | done | Linux AppImage/.deb built and smoke-tested here; all platforms built by `.github/workflows/release.yml` |
 
 Deviations and what could not be verified here:
 - Avatar is rendered as an original SVG vector character (shared model for web and react-native-svg), not Rive/Lottie:

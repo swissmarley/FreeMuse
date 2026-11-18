@@ -194,3 +194,33 @@ label.field span.hint { font-weight: 400; color: var(--c-text-muted); font-size:
 .copy-field code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; background: var(--c-surface-alt); border: 1px solid var(--c-border); border-radius: var(--r-sm); padding: 8px 10px; font-size: .85rem; }
 .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--c-accent); text-decoration: underline; cursor: pointer; }
 svg[role=button]:focus:not(:focus-visible) { outline: none; }
+
+/* ---------- voice call ---------- */
+.call { gap: 10px; }
+.call-top { position: absolute; top: 16px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.call-name { font-size: 1.35rem; font-weight: 800; }
+.call-time { font-variant-numeric: tabular-nums; color: var(--c-text-muted); min-height: 1.2em; }
+.call .vm-stage { margin-top: 64px; }
+.vm-rings.vm-ringing i { animation: callRing 1.5s ease-out infinite; border-color: color-mix(in srgb, #8DB7D9 80%, transparent); }
+.vm-rings.vm-ringing i:nth-child(2) { animation-delay: .25s; } .vm-rings.vm-ringing i:nth-child(3) { animation-delay: .5s; }
+@keyframes callRing { 0% { transform: scale(.85); opacity: .5; } 100% { transform: scale(1.25); opacity: 0; } }
+.call-controls { display: flex; gap: 22px; align-items: flex-start; justify-content: center; margin-top: 6px; }
+.call-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; background: none; border: 0; color: var(--c-text); cursor: pointer; font: inherit; }
+.call-btn > span { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--c-surface-alt); border: 1px solid var(--c-border);
+  font-size: 1.4rem; font-weight: 800; transition: transform .15s var(--spring), background .2s; }
+.call-btn small { font-size: .78rem; font-weight: 700; color: var(--c-text-muted); max-width: 90px; }
+.call-btn:hover > span { transform: scale(1.05); }
+.call-btn:active > span { transform: scale(.94); }
+.call-btn:focus-visible > span { outline: 3px solid var(--c-focus); outline-offset: 3px; }
+.call-btn.on > span { background: var(--c-text); color: var(--c-bg); }
+.call-btn.end > span { width: 74px; height: 74px; background: #D9443F; border-color: #D9443F; color: #fff; }
+.call-btn.end > span { transform: rotate(135deg); }
+.call-btn.end:active > span { transform: rotate(135deg) scale(.94); }
+.call-btn:disabled { opacity: .5; cursor: default; }
+.call-ended { opacity: .6; transition: opacity .5s; }
+[data-reduced-motion="true"] .vm-rings.vm-ringing i { animation: none; }
+@media (prefers-reduced-motion: reduce) { .vm-rings.vm-ringing i { animation: none; } }
+.btn.call-start { background: #3FA35B; color: #fff; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(30, 20, 10, .45); display: grid; place-items: center; padding: 16px; }
+.modal { max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.el-setup { border: 1px dashed var(--c-border); border-radius: var(--r-lg); padding: 14px; }

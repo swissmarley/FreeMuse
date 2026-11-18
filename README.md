@@ -11,6 +11,45 @@ only. This is an independent project, not Meta software, and it does not use Met
 > See [PLAN.md](PLAN.md) for the architecture, the verified API facts, and what is intentionally *not* replicable, and
 > [PRIVACY.md](PRIVACY.md) for data handling.
 
+## Download the apps (v0.1.0)
+
+Get them from [GitHub Releases](https://github.com/swissmarley/FreeMuse/releases/tag/v0.1.0): **macOS** (.dmg, universal),
+**Windows** (installer or portable .exe), **Linux** (.AppImage, .deb), **Android** (.apk) and **iOS** (unsigned .ipa for
+AltStore/Sideloadly). The apps are clients for **your** Free Muse server (below): the desktop app asks for the web address
+(e.g. `http://localhost:3000`), the mobile app for the API address (e.g. `http://192.168.1.20:4000`). The builds are not
+code-signed; the release notes explain how to open them. Releases are built by `.github/workflows/release.yml` whenever a
+`v*` tag is pushed.
+
+## Languages
+
+English (default), **Italiano**, **Deutsch**, **Français** and **Español**. Pick one on the first screen or in
+**Settings → Language**: the whole interface, the agent's replies, speech recognition (language hint) and the voice
+switch together. Strings live in `packages/core/src/i18n/` and every language must translate every key (type-checked).
+
+## Voice calls
+
+Tap **📞 Call** to talk to your character like on a phone call: it rings, picks up, greets you, and then it's
+hands-free. Just talk; it answers when you pause (voice activity detection), and you can talk over it to interrupt
+(barge-in; on phones, tap it). While it works it keeps you company ("one moment, I'm on it"), and replies on a call
+are short and spoken (no lists or links). Controls: mute, captions (web), speaker/earpiece (mobile), a red hang-up
+button and a call timer. Keyboard: **M** mutes, **Esc** hangs up.
+
+## ElevenLabs voices
+
+For a professional voice in every language, paste your own **ElevenLabs API key** in **Settings → Voice** (the free plan
+works; create a key at elevenlabs.io → Developers → API Keys). The server checks it, stores it encrypted in your vault and
+synthesises speech itself, so the key never reaches the apps. Pick a voice from your account and a model under
+**Customise → Voice**: *Flash v2.5* (default, lowest latency, ideal for calls), *Turbo v2.5* or *Multilingual v2* (best
+quality). On the free plan use the default voices (library voices need a paid plan). If your quota runs out, the app falls
+back to the local natural voice (English) or the best device voice automatically.
+
+## Contributor mode (save tokens)
+
+Off by default. In **Settings → Privacy & data** you can turn on Contributor mode: the agent then uses Meta's lower-cost
+Contributor-mode models (`muse-spark-1.3-contributor`) to save tokens, **in exchange for agreeing that Meta may use your
+content to train and improve its AI**. Turning it on needs an explicit consent dialog; the time of consent is recorded in
+the audit trail, and you can turn it off any time. Operators can disable it with `ALLOW_CONTRIBUTOR_MODE=false`.
+
 ## Quick start (one command)
 
 ```bash
@@ -40,7 +79,8 @@ Mobile: `cd apps/mobile && EXPO_PUBLIC_API_URL=http://<your-lan-ip>:4000 pnpm st
 | Path | What |
 |---|---|
 | `apps/web` | Next.js app and installable PWA (desktop and mobile web), Web Push |
-| `apps/mobile` | Expo / React Native app (expo-router), Expo push (FCM/APNs), haptics, voice |
+| `apps/mobile` | Expo / React Native app (expo-router), Expo push (FCM/APNs), haptics, voice calls; asks for your server address |
+| `apps/desktop` | Electron desktop client (macOS, Windows, Linux) for your server's web app; mic permission for calls |
 | `packages/core` | `brand.ts`, avatar config + state machine + **original** vector character, schemas, API client, i18n (en/de/fr/it/es) |
 | `packages/llm` | `LLMProvider` interface: `responses` (Meta Model API, stateless encrypted-reasoning replay), `chat` (any OpenAI-compatible), `scripted` (tests) |
 | `packages/db` | Postgres + pgvector migrations, **append-only hash-chained audit log**, repositories |
@@ -87,7 +127,8 @@ All variables are documented in [`.env.example`](.env.example). The important on
 | `TTS_CACHE_DIR` / `TTS_DTYPE` / `TTS_PRELOAD` | — / `q8` / `true` | Where the ~90 MB voice model is cached, its precision, and whether to warm it at startup |
 | `STT_PROVIDER` | `meta` | `muse-voice-transcribe-1.0` (realtime WebSocket + file), proxied server-side |
 | `VAPID_*` / `EXPO_ACCESS_TOKEN` | generated / — | Web Push / Expo push |
-| `ALLOW_CONTRIBUTOR_MODE` | `false` | Contributor-mode (training) models are only used if this is true **and** the user opts in |
+| `ALLOW_CONTRIBUTOR_MODE` | `true` | Lets users opt in to Contributor mode (cheaper models; Meta may train on their content). Each user must consent explicitly; `false` hides the option |
+| `ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io` | Users bring their own ElevenLabs key in the app; nothing else to configure |
 
 Voice defaults: STT is Meta `muse-voice-transcribe-1.0`. On the web it streams 24 kHz PCM through an AudioWorklet into the API's
 WebSocket proxy, so the key never reaches the client. On mobile it records a clip, and the server converts it with ffmpeg and
@@ -97,7 +138,8 @@ transcribes it.
 (Apache-2.0) on the CPU through `kokoro-js`, so speech sounds human, costs nothing, and the text never leaves your server. The
 model (~90 MB) downloads once on first start (`docker compose` keeps it in the `models` volume). Replies are split into sentences
 and streamed, so the first sentence plays while the rest is synthesised. Pick a voice (Heart, Bella, Nicole, Sky, …) in
-**Customise → Voice**; a slightly higher pitch makes the character sound cuter. Natural voices speak English; for other languages,
+**Customise → Voice**; a slightly higher pitch makes the character sound cuter. Natural voices speak English; for other languages
+add your ElevenLabs key (see **ElevenLabs voices**), otherwise
 or if the model isn't available, the app picks the most natural voice installed on the device (it ranks voices and avoids
 robotic engines such as eSpeak) instead of the system default.
 
@@ -108,7 +150,7 @@ fur hood, ear nubs, a little sprout, a pale face, glossy eyes, blush and a small
 (web) and `react-native-svg` (mobile). States: idle (breathing, gentle sway, wandering gaze), blink (random 3–6 s), wave, **listening** (ears perk up and
 wiggle with your voice, sound waves by the ear), thinking, speaking (mouth driven by TTS amplitude, head bob and hand gestures),
 happy, working, sleeping. On top of that it plays **reactions**: giggle, love (floating hearts), jump, cheer (sparkles), nod,
-curious (question mark), oops (sweat drop) and hello. In **voice mode** the character is big and interactive: its eyes follow your
+curious (question mark), oops (sweat drop) and hello. In a **voice call** the character is big and interactive: its eyes follow your
 pointer, you can tap it to play, it nods when you finish talking and reacts to what it says (cheers when something is done, a
 little "oops" when it can't, hearts when you say thanks). It respects "reduce motion". To use your own artwork, add it
 to `assets/avatar/` and set `AVATAR_ASSET` in `packages/core/src/avatar/config.ts`. The default name lives in the same file
@@ -167,7 +209,7 @@ No config files, no restart. Then **Connect with Google** connects Gmail, Calend
 recommended permissions (sending and creating events still ask you first, every time).
 
 Also try: *"Remember that Anna is vegetarian"* → **Memory**; then *"Forget that Anna is vegetarian"*. Try **Voice** mode
-(hold to talk, or tap once and tap again; tap the character to play). In **Settings**, try **Export my data** and **Delete everything**.
+(tap **📞 Call** and just talk; talk over it to interrupt). In **Settings**, try **Export my data** and **Delete everything**.
 
 ## Security notes
 

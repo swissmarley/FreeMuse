@@ -4,7 +4,7 @@ This app is self-hosted for personal use. **You** run it and you are the data co
 software stores and how to control it, with the GDPR and EU AI Act in mind.
 
 ## AI transparency (EU AI Act, Art. 50)
-You are interacting with an AI agent. This is disclosed during onboarding, on every chat screen, in voice mode, and through an
+You are interacting with an AI agent. This is disclosed during onboarding, on every chat screen, during voice calls, and through an
 `x-ai-disclosure` header on the API. The agent never claims to be human.
 
 ## Age
@@ -24,15 +24,25 @@ Everything is stored in your own Postgres and Redis (Docker volumes on your mach
 
 ## Who receives data
 - **Your model provider** (default: Meta Model API, `api.meta.ai`) receives the prompts needed to answer you and to act:
-  chat context, relevant memories, and tool results. Standard-mode model IDs are used, where the provider states your
-  content is not used for training. The **training opt-out is on by default**. Contributor-mode (training) models are only
-  used if the operator sets `ALLOW_CONTRIBUTOR_MODE=true` **and** you switch the opt-out off. Check the provider's own terms
-  and regional availability.
+  chat context, relevant memories, and tool results. By default Standard-mode model IDs are used, where the provider states
+  your content is not used for training.
+- **Contributor mode (opt-in, off by default).** If you turn it on in Settings, after reading a consent dialog and ticking
+  "I agree that Meta may use my data to train and improve AI models", your chat turns and background tasks use Meta's
+  lower-cost Contributor-mode models (`…-contributor`). Meta may then store and use that content (messages, files, tool
+  results) to train and improve its models, under Meta's terms. The time of your consent is recorded in your settings and
+  in the audit trail. Secrets, passwords and connector tokens are never sent. Turning it off applies to new messages
+  immediately (content already sent can't be recalled from Meta). The operator can disable the option with
+  `ALLOW_CONTRIBUTOR_MODE=false`. The Sentinel safety reviewer always uses Standard mode.
 - **Services you connect** (e.g. Google) receive only the requests needed for actions you allow, limited to the scopes you choose.
 - **Push services** (Web Push endpoints, Expo/FCM/APNs) receive notification titles and short texts.
 - **Spoken replies** are synthesised on your own server by default (`TTS_PROVIDER=local`); the text is not sent anywhere.
   The voice model itself is downloaded once from Hugging Face. If the operator sets `TTS_PROVIDER=openai-compatible`, the
   text of spoken replies goes to that endpoint. Device voices may use your OS vendor's speech service.
+- **ElevenLabs (optional).** If you add your own ElevenLabs API key, the text of spoken replies (never your microphone
+  audio) is sent from your server to ElevenLabs to create the voice, under your ElevenLabs account's terms. The key is
+  stored encrypted in your vault, is never sent to the apps, and is deleted when you remove it or delete your account.
+- **Speech-to-text:** in voice calls and hold-to-talk, your recorded speech is sent from your server to the model
+  provider's transcription service (`muse-voice-transcribe-1.0`) with a hint for your language. Recordings are not stored.
 - Nothing is sold or used for advertising. There is no analytics or telemetry.
 
 ## Your rights and controls
@@ -41,7 +51,7 @@ Everything is stored in your own Postgres and Redis (Docker volumes on your mach
   including the audit trail.
 - **Rectification / forgetting:** edit or delete memories in **Memory**, or say "forget …" in chat.
 - **Restriction:** disconnect any app, reduce its scopes, block websites, and switch off proactive suggestions.
-- **Objection to training:** keep the training opt-out on (default).
+- **Objection to training:** keep Contributor mode off (default), or turn it off at any time in Settings.
 
 ## Data minimisation and security
 Only the data needed for features is kept. Passwords use scrypt. Sessions are revocable. Logs redact secrets. Every external

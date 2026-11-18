@@ -80,7 +80,7 @@ describe.skipIf(!url)('full stack (scripted model)', () => {
     const cfg: ApiConfig = {
       port: 0, jwtSecret: randomBytes(32).toString('hex'), vaultMasterKey: randomBytes(32).toString('base64'), sentinelPublicKey: sKeys.publicKey, sentinelUrl,
       sentinelClientToken: clientToken, executorPrivateKey: eKeys.privateKey, internalToken, webOrigin: ['http://localhost:3000'], publicUrl: 'http://localhost:4000',
-      vapidSubject: 'mailto:x@y.z', paymentProvider: 'virtual-card-stub', llmBaseUrl: 'http://127.0.0.1:9', sttProvider: 'none', tts: { provider: 'device' }, secureCookies: false,
+      vapidSubject: 'mailto:x@y.z', paymentProvider: 'virtual-card-stub', llmBaseUrl: 'http://127.0.0.1:9', sttProvider: 'none', tts: { provider: 'device' }, secureCookies: false, allowContributorMode: false, elevenlabsBaseUrl: 'http://127.0.0.1:9',
     };
     const vault = new Vault(db, cfg.vaultMasterKey);
     const registry = buildRegistry(cfg);
