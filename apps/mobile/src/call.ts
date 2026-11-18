@@ -6,13 +6,12 @@
  */
 import { File } from 'expo-file-system';
 import { setAudioModeAsync, type AudioRecorder } from 'expo-audio';
-import { Vad, type VadOptions } from '@muse/core/voice';
+import { dbToLevel, Vad, type VadOptions } from '@muse/core/voice';
 import { api } from './api';
 
-/** Metering is in dBFS (-160..0); map roughly -55..-5 dB to 0..1. */
-export const dbToLevel = (db: number | undefined) => (typeof db === 'number' ? Math.max(0, Math.min(1, (db + 55) / 50)) : 0);
-/** On the dB-mapped scale the background sits higher, so ask for a clear margin over it. */
-export const MOBILE_VAD: VadOptions = { minLevel: 0.3, ratio: 1.6, startMs: 160, endMs: 900, minSpeechMs: 350 };
+/** Metering is in dBFS (-160..0), mapped to 0..1 by dbToLevel. Phone recorders have no noise suppression, so the
+ *  background sits higher: ask for a clear margin over it. */
+export const MOBILE_VAD: VadOptions = { minLevel: 0.3, margin: 0.18, startMs: 160, endMs: 900, minSpeechMs: 350, maxSpeechMs: 45_000 };
 
 /** During a call, keep the audio session in play-and-record mode; route to the earpiece or the speaker. */
 let callAudio: { active: boolean; earpiece: boolean } = { active: false, earpiece: false };
