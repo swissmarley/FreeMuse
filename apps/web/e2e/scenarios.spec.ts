@@ -31,7 +31,7 @@ test('age gate blocks under-18s', async () => {
   await page.goto('/onboarding');
   await expect(page.getByRole('img', { name: /Jolly is waving/ })).toBeVisible();
   await expect(page.getByText(/You are chatting with an AI agent/)).toBeVisible();
-  await page.getByRole('button', { name: "Let's start" }).click();
+  await page.getByRole('button', { name: /Let.s start/ }).click();
   const y = new Date().getFullYear() - 16;
   await page.getByLabel('Date of birth').fill(`${y}-01-01`);
   await page.getByRole('button', { name: 'Continue' }).click();
@@ -40,7 +40,7 @@ test('age gate blocks under-18s', async () => {
 
 test('adult signs up, names the avatar and lands in chat', async () => {
   await page.goto('/onboarding');
-  await page.getByRole('button', { name: "Let's start" }).click();
+  await page.getByRole('button', { name: /Let.s start/ }).click();
   await page.getByLabel('Date of birth').fill('1990-05-20');
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('Email').fill(email);
@@ -79,15 +79,29 @@ test('one-tap demo connect, and Google offers a guided setup instead of env vars
   await expect(page.locator('.setup-guide [role=alert]')).toContainText('apps.googleusercontent.com');
 });
 
-test('voice mode: the character greets you and reacts when tapped', async () => {
+test('voice call: rings, connects, mute and hang up', async () => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Start voice mode' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Voice mode' });
-  await expect(dialog.getByText(/I'm all ears/)).toBeVisible();
-  await dialog.getByRole('button', { name: /Tap to play with/ }).click();
-  await expect(dialog.locator('.vm-bubble')).toContainText(/tickles/);
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Call Pip' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Call Pip' });
+  await expect(dialog.locator('.vm-status')).toContainText('Calling Pip');
+  await expect(dialog.locator('.call-time')).toHaveText(/^0:0\d$/, { timeout: 15_000 });
+  await dialog.getByRole('button', { name: 'Mute' }).click();
+  await expect(dialog.locator('.vm-status')).toHaveText('Muted');
+  await dialog.getByRole('button', { name: 'Unmute' }).click();
+  await dialog.getByRole('button', { name: 'End call' }).click();
   await expect(dialog).toBeHidden();
+});
+
+test('language: the whole app switches to Italian and back', async () => {
+  await page.goto('/settings');
+  await page.getByLabel('Language').selectOption('it');
+  await expect(page.getByRole('heading', { name: 'Impostazioni' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Approvazioni' }).first()).toBeVisible();
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Chiama Pip' })).toBeVisible();
+  await page.goto('/settings');
+  await page.getByLabel('Lingua').selectOption('en');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 });
 
 test('scenario 1: trip + host email waits for approval, approve sends it', async () => {
@@ -149,7 +163,7 @@ test('avatar customisation persists', async () => {
   await page.getByRole('button', { name: 'beanie' }).click();
   await page.getByRole('button', { name: 'round' }).click();
   await page.getByLabel('Name').fill('Biscuit');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Saved ✓')).toBeVisible();
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Biscuit' })).toBeVisible();

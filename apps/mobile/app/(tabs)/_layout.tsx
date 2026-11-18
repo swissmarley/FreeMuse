@@ -16,7 +16,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="tasks" options={{ title: t.tasks, tabBarIcon: icon('📋'), tabBarBadge: s.tasksRunning || undefined }} />
       <Tabs.Screen name="approvals" options={{ title: t.approvals, tabBarIcon: icon('✅'), tabBarBadge: s.pendingApprovals || undefined }} />
       <Tabs.Screen name="activity" options={{ title: t.activity, tabBarIcon: icon('🕒') }} />
-      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: icon('⋯') }} />
+      <Tabs.Screen name="more" options={{ title: t.more, tabBarIcon: icon('⋯') }} />
     </Tabs>
   );
 }

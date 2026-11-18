@@ -38,13 +38,18 @@ export interface Personality {
 export interface VoicePref {
   /**
    * 'auto' (default): a natural neural voice from the server when it speaks your language, otherwise the most
-   * natural voice installed on the device. 'server' / 'device' force one of the two.
+   * natural voice installed on the device; ElevenLabs first when the user has added an ElevenLabs API key.
+   * 'server' / 'device' / 'elevenlabs' force one engine.
    */
-  provider: 'auto' | 'device' | 'server';
+  provider: 'auto' | 'device' | 'server' | 'elevenlabs';
   /** Device voice id (Web Speech voiceURI / expo-speech identifier); '' = pick the best one automatically. */
   voiceId: string;
   /** Natural (server) voice id, see NATURAL_VOICES. */
   naturalVoice: string;
+  /** ElevenLabs voice id ('' = the default professional voice). */
+  elevenVoice: string;
+  /** ElevenLabs model id, see ELEVEN_MODELS. */
+  elevenModel: string;
   rate: number; // 0.5..2
   pitch: number; // 0.5..2
 }
@@ -61,7 +66,7 @@ export const DEFAULT_AVATAR: AvatarSettings = {
   name: DEFAULT_AVATAR_NAME,
   persona: '',
   personality: { warmth: 80, playfulness: 55, verbosity: 35, proactivity: 65, formality: 25 },
-  voice: { provider: 'auto', voiceId: '', naturalVoice: 'af_heart', rate: 1, pitch: 1.1 },
+  voice: { provider: 'auto', voiceId: '', naturalVoice: 'af_heart', elevenVoice: '', elevenModel: 'eleven_flash_v2_5', rate: 1, pitch: 1.1 },
   outfit: {
     hat: 'none',
     hatColor: '#C9465A',
@@ -94,5 +99,7 @@ export function normalizeVoicePref(v: Partial<VoicePref> | undefined): VoicePref
   const out: VoicePref = { ...DEFAULT_AVATAR.voice, ...(v ?? {}) };
   if (out.provider === 'device' && !out.voiceId) out.provider = 'auto';
   if (!out.naturalVoice) out.naturalVoice = DEFAULT_AVATAR.voice.naturalVoice;
+  if (typeof out.elevenVoice !== 'string') out.elevenVoice = '';
+  if (!out.elevenModel) out.elevenModel = DEFAULT_AVATAR.voice.elevenModel;
   return out;
 }

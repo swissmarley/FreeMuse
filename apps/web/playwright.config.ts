@@ -8,7 +8,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['list']],
-  use: { baseURL: 'http://localhost:3300', trace: 'off', ...devices['Desktop Chrome'], launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {} },
+  use: { baseURL: 'http://localhost:3300', trace: 'off', ...devices['Desktop Chrome'], permissions: ['microphone'],
+    launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'], ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}) } },
   webServer: {
     command: 'node ../../scripts/e2e-stack.mjs',
     cwd: '.',

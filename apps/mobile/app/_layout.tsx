@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { onNotificationTap, registerForPush } from '../src/push';
+import { strings } from '@muse/core/i18n';
 import { MuseProvider, useMuse } from '../src/store';
 
 function Gate() {
@@ -20,14 +21,15 @@ function Gate() {
     void registerForPush().catch(() => {});
     return onNotificationTap((url) => router.push(url as never));
   }, [s.me?.onboarded, router]);
+  const t = strings(s.me?.settings.language);
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="onboarding" />
-      <Stack.Screen name="memory" options={{ headerShown: true, title: 'Memory' }} />
-      <Stack.Screen name="connections" options={{ headerShown: true, title: 'Connections' }} />
-      <Stack.Screen name="avatar" options={{ headerShown: true, title: 'Customise' }} />
-      <Stack.Screen name="settings" options={{ headerShown: true, title: 'Settings' }} />
+      <Stack.Screen name="memory" options={{ headerShown: true, title: t.memory }} />
+      <Stack.Screen name="connections" options={{ headerShown: true, title: t.connections }} />
+      <Stack.Screen name="avatar" options={{ headerShown: true, title: s.me ? strings(s.me.settings.language).customiseName.replace('{name}', s.me.avatar.name) : t.avatar }} />
+      <Stack.Screen name="settings" options={{ headerShown: true, title: t.settings }} />
     </Stack>
   );
 }

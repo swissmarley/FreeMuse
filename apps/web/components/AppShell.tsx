@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import { BRAND } from '@muse/core/brand';
-import { strings } from '@muse/core/i18n';
+import { fmt, strings } from '@muse/core/i18n';
 import { useMuse } from '../lib/store';
 import { registerServiceWorker } from '../lib/push';
 import { Avatar } from './Avatar';
@@ -29,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     void registerServiceWorker();
   }, [me]);
 
-  if (!me || !me.onboarded) return <div className="center" aria-busy="true"><p className="muted">Loading…</p></div>;
+  if (!me || !me.onboarded) return <div className="center" aria-busy="true"><p className="muted">{strings(me?.settings.language).loading}</p></div>;
   const t = strings(me.settings.language);
   const links: { href: string; label: string; short: string; badge?: number }[] = [
     { href: '/', label: t.chat, short: t.chat },
@@ -37,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: '/approvals', label: t.approvals, short: t.approvals, badge: s.pendingApprovals || undefined },
     { href: '/activity', label: t.activity, short: t.activity },
     { href: '/memory', label: t.memory, short: t.memory },
-    { href: '/connections', label: t.connections, short: 'Apps' },
+    { href: '/connections', label: t.connections, short: t.connectionsShort },
     { href: '/avatar', label: me.avatar.name, short: me.avatar.name },
     { href: '/settings', label: t.settings, short: t.settings },
   ];
@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {links.map((l) => (
           <Link key={l.href} href={l.href} className="nav-link" aria-current={path === l.href ? 'page' : undefined}>
             <span>{l.label}</span>
-            {l.badge ? <span className="badge" aria-label={`${l.badge} pending`}>{l.badge}</span> : null}
+            {l.badge ? <span className="badge" aria-label={fmt(t.pendingBadge, { count: l.badge })}>{l.badge}</span> : null}
           </Link>
         ))}
         <div style={{ flex: 1 }} />

@@ -10,7 +10,9 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 import WebSocket from 'ws';
 import { NATURAL_VOICE_LANGS, NATURAL_VOICES } from '@muse/core/voice';
 import type { Deps } from '../deps.js';
+import { defaultVoices, ElevenError, ElevenLabs, keyHint, looksLikeElevenKey } from '../elevenlabs.js';
 import { LocalTTS } from '../tts.js';
+import { appendAudit } from '@muse/db';
 
 export function toWav24k(input: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -41,6 +43,10 @@ export async function transcribeWav(baseUrl: string, apiKey: string, wav: Buffer
   const r = await fetch(`${baseUrl.replace(/\/$/, '')}/asr/transcribe`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, accept: 'text/plain' }, body: form });
   const text = await r.text();
   if (!r.ok) throw new Error(`Transcription failed (${r.status})`);
+  // The API may answer with plain text or with JSON ({ transcript, turns, ... }).
+  if (/^\s*\{/.test(text)) {
+    try { return String((JSON.parse(text) as { transcript?: string }).transcript ?? '').trim(); } catch { /* plain text after all */ }
+  }
   return text.trim();
 }
 
@@ -55,9 +61,14 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
     : null;
   // Warm the model in the background so the first reply in voice mode doesn't wait for the download.
   if (local && t.preload && process.env.NODE_ENV !== 'test') void local.load().catch(() => {});
+  const eleven = new ElevenLabs(d.cfg.elevenlabsBaseUrl, d.vault);
+  const userLang = async (userId: string): Promise<string> => {
+    const u = await d.db.one('SELECT settings FROM users WHERE id=$1', [userId]);
+    return String(u?.settings?.language ?? 'en');
+  };
   const naturalAvailable = () => (t.provider === 'openai-compatible' ? !!t.baseUrl : !!local && local.status !== 'error');
 
-  app.get('/v1/voice/config', auth, async () => ({
+  app.get('/v1/voice/config', auth, async (req) => ({
     stt: d.cfg.sttProvider !== 'none' && !!d.cfg.modelApiKey,
     tts: t.provider,
     natural: {
@@ -66,7 +77,42 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
       languages: NATURAL_VOICE_LANGS,
       voices: NATURAL_VOICES,
     },
+    elevenlabs: await eleven.status(req.user!.id).catch(() => ({ configured: false, keyHint: null })),
   }));
+
+  // ---------- ElevenLabs (the user's own key, stored encrypted in their vault) ----------
+  app.get('/v1/voice/elevenlabs', auth, async (req) => eleven.status(req.user!.id));
+
+  app.put('/v1/voice/elevenlabs', { ...auth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const apiKey = String((req.body as { apiKey?: string } | undefined)?.apiKey ?? '').trim();
+    if (!looksLikeElevenKey(apiKey)) return reply.code(400).send({ code: 'invalid', message: 'That does not look like an ElevenLabs API key (it starts with sk_)' });
+    try {
+      const voices = await eleven.save(req.user!.id, apiKey);
+      await d.db.tx((c) => appendAudit(c, { userId: req.user!.id, kind: 'setup.elevenlabs', actor: 'user', summary: `Connected ElevenLabs voices (key ${keyHint(apiKey)})` }));
+      return { ok: true, keyHint: keyHint(apiKey), voices };
+    } catch (e) {
+      if (e instanceof ElevenError) return reply.code(e.status === 401 ? 400 : e.status).send({ code: e.code, message: e.message });
+      return reply.code(502).send({ code: 'elevenlabs_unreachable', message: 'Could not reach ElevenLabs. Check the server can access api.elevenlabs.io.' });
+    }
+  });
+
+  app.delete('/v1/voice/elevenlabs', auth, async (req) => {
+    await eleven.remove(req.user!.id);
+    await d.db.tx((c) => appendAudit(c, { userId: req.user!.id, kind: 'setup.elevenlabs', actor: 'user', summary: 'Removed the ElevenLabs key' }));
+    return { ok: true };
+  });
+
+  app.get('/v1/voice/elevenlabs/voices', auth, async (req, reply) => {
+    const key = await eleven.key(req.user!.id);
+    if (!key) return reply.code(409).send({ code: 'elevenlabs_not_configured', message: 'Add your ElevenLabs API key first' });
+    try {
+      return { voices: await eleven.voices(key) };
+    } catch (e) {
+      if (e instanceof ElevenError && e.code === 'elevenlabs_permissions') return { voices: defaultVoices() };
+      if (e instanceof ElevenError) return reply.code(e.status).send({ code: e.code, message: e.message });
+      return reply.code(502).send({ code: 'elevenlabs_unreachable', message: 'Could not reach ElevenLabs' });
+    }
+  });
 
   app.post('/v1/voice/transcribe', { ...auth, bodyLimit: 15 * 1024 * 1024, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     if (!d.cfg.modelApiKey || d.cfg.sttProvider === 'none') return reply.code(501).send({ code: 'stt_disabled', message: 'Speech-to-text is not configured' });
@@ -74,7 +120,8 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
     if (!audio) return reply.code(400).send({ code: 'invalid', message: 'audio (base64) required' });
     let buf: Buffer = Buffer.from(audio, "base64");
     if (!isSupportedWav(buf)) buf = await toWav24k(buf);
-    const text = await transcribeWav(d.cfg.llmBaseUrl, d.cfg.modelApiKey, buf, language ? LANG_NAMES[language] : undefined);
+    const lang = language && LANG_NAMES[language] ? language : await userLang(req.user!.id);
+    const text = await transcribeWav(d.cfg.llmBaseUrl, d.cfg.modelApiKey, buf, LANG_NAMES[lang]);
     return { text };
   });
 
@@ -113,9 +160,21 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
   });
 
   app.post('/v1/voice/tts', { ...auth, config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const { text, voice, speed } = (req.body ?? {}) as { text?: string; voice?: string; speed?: number };
+    const { text, voice, speed, engine, lang, model } = (req.body ?? {}) as { text?: string; voice?: string; speed?: number; engine?: string; lang?: string; model?: string };
     const input = String(text ?? '').slice(0, 1200);
     if (!input.trim()) return reply.code(400).send({ code: 'invalid', message: 'text required' });
+    if (engine === 'elevenlabs') {
+      const key = await eleven.key(req.user!.id);
+      if (!key) return reply.code(409).send({ code: 'elevenlabs_not_configured', message: 'Add your ElevenLabs API key in Settings' });
+      try {
+        const mp3 = await eleven.synth(key, { text: input, voiceId: String(voice ?? ''), model: String(model ?? ''), lang: String(lang ?? ''), speed: Number(speed ?? 1) });
+        reply.header('content-type', 'audio/mpeg').header('cache-control', 'private, max-age=3600');
+        return reply.send(mp3);
+      } catch (e) {
+        if (e instanceof ElevenError) return reply.code(e.status === 401 ? 424 : e.status).send({ code: e.code, message: e.message });
+        return reply.code(502).send({ code: 'elevenlabs_unreachable', message: 'Could not reach ElevenLabs' });
+      }
+    }
     if (local) {
       try {
         const wav = await local.synth(input, String(voice ?? ''), Number(speed ?? 1));

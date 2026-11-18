@@ -3,17 +3,18 @@
  * Voice providers (web):
  *  - STT: realtime streaming (AudioWorklet → API WS proxy → Meta muse-voice-transcribe-1.0); falls back to recording a
  *    clip and POSTing it for file transcription.
- *  - TTS: natural neural voices synthesised locally by the API (Kokoro) and played through Web Audio, with
- *    amplitude-driven lip-sync. Falls back to the most natural installed Web Speech voice (never blindly the
- *    system default, which is often a robotic eSpeak voice on Linux).
+ *  - TTS: professional ElevenLabs voices (the user's own key, every language) or natural neural voices synthesised
+ *    locally by the API (Kokoro, English), played through Web Audio with amplitude-driven lip-sync. Falls back to the
+ *    most natural installed Web Speech voice for the user's language (never blindly the system default).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoicePref } from '@muse/core/avatar';
 import type { VoiceConfig } from '@muse/core/client';
-import { type DeviceVoiceLike, naturalPlayback, naturalVoiceSpeaks, pickDeviceVoice, splitForSpeech } from '@muse/core/voice';
+import { speechLocale } from '@muse/core/i18n';
+import { chooseTtsEngine, type DeviceVoiceLike, naturalPlayback, pickDeviceVoice, splitForSpeech, type TtsEngine } from '@muse/core/voice';
 import { api, API_URL } from './api';
 
-export interface TTSProvider { readonly kind: 'natural' | 'device'; speak(text: string, onLevel: (v: number) => void): Promise<void>; stop(): void }
+export interface TTSProvider { readonly kind: TtsEngine; speak(text: string, onLevel: (v: number) => void): Promise<void>; stop(): void }
 
 // ---------- shared audio context (must be unlocked by a user gesture once) ----------
 let sharedCtx: AudioContext | null = null;
@@ -66,7 +67,8 @@ export class DeviceTTS implements TTSProvider {
     if (!synth) return;
     this.cancelled = false;
     synth.cancel();
-    const voice = pickDeviceVoice((await deviceVoices()).map(asVoiceLike), this.lang, this.pref.voiceId)?.voice;
+    const locale = speechLocale(this.lang);
+    const voice = pickDeviceVoice((await deviceVoices()).map(asVoiceLike), locale, this.pref.voiceId)?.voice;
     // Lip-sync: pulse the mouth on word boundaries, with a gentle decay between them.
     let level = 0;
     const timer = setInterval(() => { level *= 0.75; onLevel(level); }, 50);
@@ -76,7 +78,7 @@ export class DeviceTTS implements TTSProvider {
         if (this.cancelled) break;
         await new Promise<void>((resolve) => {
           const u = new SpeechSynthesisUtterance(chunk);
-          u.lang = voice?.lang ?? this.lang;
+          u.lang = voice?.lang ?? locale;
           if (voice) u.voice = voice;
           u.rate = this.pref.rate;
           u.pitch = this.pref.pitch;
@@ -94,16 +96,17 @@ export class DeviceTTS implements TTSProvider {
   }
 }
 
-// ---------- natural (server) voices ----------
-export class NaturalTTS implements TTSProvider {
-  readonly kind = 'natural' as const;
+// ---------- server voices: ElevenLabs (user's key) or natural (Kokoro on the server) ----------
+export class ServerTTS implements TTSProvider {
   private gen = 0;
   private source: AudioBufferSourceNode | null = null;
-  constructor(private pref: VoicePref) {}
+  constructor(private pref: VoicePref, readonly kind: 'natural' | 'elevenlabs' = 'natural', private lang = 'en') {}
   stop() { this.gen++; try { this.source?.stop(); } catch { /* already stopped */ } this.source = null; }
 
   private async fetchChunk(text: string, speed: number): Promise<AudioBuffer> {
-    const { audio } = await api.tts(text, this.pref.naturalVoice, speed);
+    const { audio } = this.kind === 'elevenlabs'
+      ? await api.tts(text, this.pref.elevenVoice, speed, { engine: 'elevenlabs', lang: this.lang, model: this.pref.elevenModel })
+      : await api.tts(text, this.pref.naturalVoice, speed);
     return audioContext().decodeAudioData(audio);
   }
 
@@ -112,7 +115,8 @@ export class NaturalTTS implements TTSProvider {
     const my = ++this.gen;
     const chunks = splitForSpeech(text);
     if (!chunks.length) return;
-    const { synthSpeed, playbackRate } = naturalPlayback(this.pref.rate, this.pref.pitch);
+    // ElevenLabs voices keep their natural pitch; the cute pitch shift only applies to the local voices.
+    const { synthSpeed, playbackRate } = this.kind === 'elevenlabs' ? { synthSpeed: this.pref.rate, playbackRate: 1 } : naturalPlayback(this.pref.rate, this.pref.pitch);
     const ctx = audioContext();
     if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
     const analyser = ctx.createAnalyser();
@@ -156,22 +160,33 @@ export class NaturalTTS implements TTSProvider {
 }
 
 /** Pick the engine for this preference + language. */
+export function engineFor(pref: VoicePref, lang: string, cfg: VoiceConfig | null): TtsEngine {
+  return chooseTtsEngine(pref.provider, lang, { elevenlabs: !!cfg?.elevenlabs?.configured, natural: !!cfg?.natural.available });
+}
 export function createTTS(pref: VoicePref, lang: string, cfg: VoiceConfig | null): TTSProvider {
-  const natural = !!cfg?.natural.available && pref.provider !== 'device' && (pref.provider === 'server' || naturalVoiceSpeaks(lang));
-  return natural ? new NaturalTTS(pref) : new DeviceTTS(pref, lang);
+  const e = engineFor(pref, lang, cfg);
+  return e === 'device' ? new DeviceTTS(pref, lang) : new ServerTTS(pref, e, lang);
 }
 
-/** One-off voice preview (avatar page, onboarding). */
-export async function previewVoice(pref: VoicePref, lang: string, text: string, onLevel: (v: number) => void = () => {}): Promise<'natural' | 'device'> {
-  unlockAudio();
-  const tts = createTTS(pref, lang, await loadVoiceConfig());
+/** If ElevenLabs fails (quota, network), try the local natural voice for English, then the device voice. */
+async function speakWithFallback(p: TTSProvider, pref: VoicePref, lang: string, cfg: VoiceConfig | null, text: string, onLevel: (v: number) => void): Promise<TtsEngine> {
   try {
-    await tts.speak(text, onLevel);
-    return tts.kind;
+    await p.speak(text, onLevel);
+    return p.kind;
   } catch {
+    if (p.kind === 'elevenlabs' && cfg?.natural.available && lang === 'en') {
+      try { await new ServerTTS(pref, 'natural', lang).speak(text, onLevel); return 'natural'; } catch { /* fall through */ }
+    }
     await new DeviceTTS(pref, lang).speak(text, onLevel);
     return 'device';
   }
+}
+
+/** One-off voice preview (avatar page, onboarding). */
+export async function previewVoice(pref: VoicePref, lang: string, text: string, onLevel: (v: number) => void = () => {}): Promise<TtsEngine> {
+  unlockAudio();
+  const cfg = await loadVoiceConfig();
+  return speakWithFallback(createTTS(pref, lang, cfg), pref, lang, cfg, text, onLevel);
 }
 
 export function useSpeech(pref: VoicePref, lang: string) {
@@ -188,17 +203,15 @@ export function useSpeech(pref: VoicePref, lang: string) {
     provider.current = p;
     setSpeaking(true);
     try {
-      await p.speak(text, (v) => { mouth.current = v; });
-    } catch {
-      // Natural voice unavailable right now (e.g. model still downloading): use the best device voice.
-      await new DeviceTTS(pref, lang).speak(text, (v) => { mouth.current = v; });
+      // Server voice unavailable right now (quota, model still downloading…): fall back gracefully.
+      await speakWithFallback(p, pref, lang, cfg, text, (v) => { mouth.current = v; });
     } finally {
       setSpeaking(false);
       mouth.current = 0;
     }
   }, [pref, lang, cfg]);
   const stop = useCallback(() => { provider.current?.stop(); window.speechSynthesis?.cancel(); setSpeaking(false); mouth.current = 0; }, []);
-  return { speak, stop, speaking, mouth, engine: provider.current?.kind ?? (cfg?.natural.available ? 'natural' : 'device') };
+  return { speak, stop, speaking, mouth, engine: provider.current?.kind ?? engineFor(pref, lang, cfg) };
 }
 
 /** Hold-to-talk / voice-mode recorder with live transcripts. */

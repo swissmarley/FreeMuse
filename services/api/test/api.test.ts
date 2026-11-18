@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -43,7 +44,7 @@ describe.skipIf(!url)('api', () => {
     port: 0, jwtSecret: 'test-secret-'.padEnd(40, 'x'), vaultMasterKey: randomBytes(32).toString('base64'), sentinelPublicKey: sentinelKeys.publicKey,
     sentinelUrl: 'http://127.0.0.1:9', sentinelClientToken: 'x', executorPrivateKey: executorKeys.privateKey, internalToken: 'internal-test-token',
     webOrigin: ['http://localhost:3000'], publicUrl: 'http://localhost:4000', vapidSubject: 'mailto:x@y.z', paymentProvider: 'virtual-card-stub',
-    llmBaseUrl: 'http://127.0.0.1:9', sttProvider: 'none', tts: { provider: 'device' }, secureCookies: false,
+    llmBaseUrl: 'http://127.0.0.1:9', sttProvider: 'none', tts: { provider: 'device' }, secureCookies: false, allowContributorMode: true, elevenlabsBaseUrl: 'http://127.0.0.1:9',
   };
   const sign = (a: ActionRequest, d: 'allow' | 'ask' | 'deny') => signClaims(loadPrivate(sentinelKeys.privateKey), { iss: 'sentinel', u: a.userId, h: actionHash(a), d, exp: Date.now() + 60_000 });
   const H = () => ({ authorization: `Bearer ${token}` });
@@ -85,6 +86,72 @@ describe.skipIf(!url)('api', () => {
     expect(cookie.statusCode).toBe(403);
     const ok = await app.inject({ method: 'PATCH', url: '/v1/me/settings', cookies: { muse_session: token }, headers: { 'x-muse-client': 'web' }, payload: { language: 'de' } });
     expect(ok.json().settings.language).toBe('de');
+  });
+
+  it('contributor mode needs explicit consent and flips the training opt-out', async () => {
+    const H2 = { authorization: `Bearer ${token}` };
+    const no = await app.inject({ method: 'PATCH', url: '/v1/me/settings', headers: H2, payload: { contributorMode: true } });
+    expect(no.statusCode).toBe(400);
+    expect(no.json().code).toBe('consent_required');
+    const forged = await app.inject({ method: 'PATCH', url: '/v1/me/settings', headers: H2, payload: { contributorConsentAt: '2020-01-01T00:00:00Z' } });
+    expect(forged.json().settings?.contributorConsentAt ?? null).toBeNull();
+    const yes = await app.inject({ method: 'PATCH', url: '/v1/me/settings', headers: H2, payload: { contributorMode: true, contributorConsent: true } });
+    expect(yes.json().settings).toMatchObject({ contributorMode: true, trainingOptOut: false });
+    expect(yes.json().settings.contributorConsentAt).toMatch(/^\d{4}-/);
+    const audit = await db.one("SELECT summary FROM audit_events WHERE user_id=$1 AND kind='settings.changed' ORDER BY seq DESC LIMIT 1", [userId]);
+    expect(audit.summary).toMatch(/Contributor mode turned ON/);
+    const off = await app.inject({ method: 'PATCH', url: '/v1/me/settings', headers: H2, payload: { trainingOptOut: true } });
+    expect(off.json().settings).toMatchObject({ contributorMode: false, trainingOptOut: true, contributorConsentAt: null });
+    expect((await app.inject({ method: 'GET', url: '/v1/me', headers: H2 })).json().features).toEqual({ contributorMode: true });
+  });
+
+  it('ElevenLabs: key is checked, stored encrypted, never returned, and used for speech', async () => {
+    const H2 = { authorization: `Bearer ${token}` };
+    const seen: { path: string; key: string | undefined; body: string }[] = [];
+    const fake = createServer((rq, rs) => {
+      let body = '';
+      rq.on('data', (c) => (body += c));
+      rq.on('end', () => {
+        seen.push({ path: rq.url ?? '', key: rq.headers['xi-api-key'] as string | undefined, body });
+        if (rq.headers['xi-api-key'] !== 'sk_' + 'a'.repeat(40)) { rs.writeHead(401, { 'content-type': 'application/json' }); rs.end(JSON.stringify({ detail: { status: 'invalid_api_key', message: 'bad' } })); return; }
+        if (rq.url === '/v1/voices') { rs.writeHead(200, { 'content-type': 'application/json' }); rs.end(JSON.stringify({ voices: [{ voice_id: 'cgSgspJ2msm6clMCkdW9', name: 'Jessica', category: 'premade', labels: { gender: 'female' } }] })); return; }
+        rs.writeHead(200, { 'content-type': 'audio/mpeg' });
+        rs.end(Buffer.from('ID3fake-mp3'));
+      });
+    });
+    await new Promise<void>((r) => fake.listen(0, '127.0.0.1', r));
+    cfg.elevenlabsBaseUrl = `http://127.0.0.1:${(fake.address() as { port: number }).port}`;
+    const app2 = await buildApp({ db, bus, cfg, vault: new Vault(db, cfg.vaultMasterKey), executor: new Executor(db, cfg, buildRegistry(cfg), new Vault(db, cfg.vaultMasterKey), new SandboxClient(redis, cfg.executorPrivateKey)), notifier: new Notifier(db, bus, cfg), registry: buildRegistry(cfg), sandbox: new SandboxClient(redis, cfg.executorPrivateKey), redis, sub });
+    try {
+      expect((await app2.inject({ method: 'PUT', url: '/v1/voice/elevenlabs', headers: H2, payload: { apiKey: 'nope' } })).statusCode).toBe(400);
+      const bad = await app2.inject({ method: 'PUT', url: '/v1/voice/elevenlabs', headers: H2, payload: { apiKey: 'sk_' + 'b'.repeat(40) } });
+      expect(bad.json().code).toBe('elevenlabs_invalid_key');
+      const ok = await app2.inject({ method: 'PUT', url: '/v1/voice/elevenlabs', headers: H2, payload: { apiKey: 'sk_' + 'a'.repeat(40) } });
+      expect(ok.json()).toMatchObject({ ok: true, keyHint: '…aaaa' });
+      expect(ok.json().voices[0].name).toBe('Jessica');
+      const st = await app2.inject({ method: 'GET', url: '/v1/voice/elevenlabs', headers: H2 });
+      expect(st.json()).toEqual({ configured: true, keyHint: '…aaaa' });
+      expect(JSON.stringify((await app2.inject({ method: 'GET', url: '/v1/me/export', headers: H2 })).json())).not.toContain('a'.repeat(40));
+      const tts = await app2.inject({ method: 'POST', url: '/v1/voice/tts', headers: H2, payload: { text: 'Ciao, come stai?', engine: 'elevenlabs', voice: 'cgSgspJ2msm6clMCkdW9', lang: 'it', model: 'eleven_flash_v2_5', speed: 1 } });
+      expect(tts.statusCode).toBe(200);
+      expect(tts.headers['content-type']).toBe('audio/mpeg');
+      const call = seen.at(-1)!;
+      expect(call.path).toBe('/v1/text-to-speech/cgSgspJ2msm6clMCkdW9?output_format=mp3_44100_128');
+      expect(JSON.parse(call.body)).toMatchObject({ text: 'Ciao, come stai?', model_id: 'eleven_flash_v2_5', language_code: 'it' });
+      expect((await app2.inject({ method: 'DELETE', url: '/v1/voice/elevenlabs', headers: H2 })).json()).toEqual({ ok: true });
+      const gone = await app2.inject({ method: 'POST', url: '/v1/voice/tts', headers: H2, payload: { text: 'Hi', engine: 'elevenlabs' } });
+      expect(gone.json().code).toBe('elevenlabs_not_configured');
+    } finally {
+      await app2.close();
+      fake.close();
+    }
+  });
+
+  it('voice-call messages are marked for the agent', async () => {
+    const r = await app.inject({ method: 'POST', url: '/v1/conversations/default/messages', headers: H(), payload: { text: 'Hi on the phone', channel: 'voice' } });
+    const job = await bus.queues.turns.getJob(r.json().turnId);
+    expect(job?.data.channel).toBe('voice');
+    await job?.remove();
   });
 
   it('chat message is stored, audited and enqueued', async () => {

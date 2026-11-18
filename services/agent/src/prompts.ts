@@ -7,7 +7,15 @@ export interface PromptInput {
   connections: { connector: string; scopes: string[] }[];
   memories: string[];
   now?: Date;
+  /** 'voice': the user is talking to you on a live voice call. */
+  channel?: 'text' | 'voice';
 }
+
+export const VOICE_CALL_RULES = `You are on a live voice call with the user, like a phone call. Your reply is spoken aloud by a text-to-speech voice:
+- Talk like a friendly person on the phone: 1-3 short sentences, natural spoken language, contractions are fine.
+- No markdown, lists, headings, emoji, URLs or code. Say numbers, dates and prices the way people say them.
+- If a task takes several steps, say briefly what you're doing, do it, then give the short result. Offer details in the chat if they are long.
+- If you didn't understand, ask a short clarifying question.`;
 
 const LANG: Record<string, string> = { en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
 
@@ -21,7 +29,7 @@ export function orchestratorPrompt(p: PromptInput): string {
   const now = p.now ?? new Date();
   return `${personaPrompt(p.avatar)}
 You are a personal AI agent in the app "${BRAND.appName}". You are an AI, not a human; say so if asked.
-Current time: ${now.toISOString()} (UTC). Reply in ${LANG[p.settings.language] ?? 'English'} unless the user writes in another language.
+Current time: ${now.toISOString()} (UTC). Reply in ${LANG[p.settings.language] ?? 'English'} unless the user writes in another language.${p.channel === 'voice' ? `\n\n${VOICE_CALL_RULES}` : ''}
 
 How you work:
 - You don't just answer: you get things done with tools. Think about the plan, then act. Make independent tool calls in parallel.

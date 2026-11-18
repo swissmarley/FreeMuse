@@ -78,9 +78,9 @@ describe('avatar', () => {
 });
 
 describe('i18n', () => {
-  it('falls back to English', () => {
+  it('translates and falls back to English for unknown languages', () => {
     expect(strings('de').send).toBe('Senden');
-    expect(strings('fr').holdToTalk).toBe('Hold to talk');
+    expect(strings('fr').holdToTalk).toBe('Maintenir pour parler');
     expect(strings('xx').send).toBe('Send');
   });
 });

@@ -2,8 +2,9 @@
  * Mobile voice:
  *  - STT: push-to-talk recording (expo-audio) → server transcription (Meta muse-voice-transcribe-1.0 via the API,
  *    which converts to 24 kHz WAV), with live metering so the avatar can react to your voice.
- *  - TTS: natural neural voices synthesised by the API (Kokoro) and played with expo-audio, sentence by sentence;
- *    falls back to the most natural installed voice via expo-speech (never blindly the default compact voice).
+ *  - TTS: professional ElevenLabs voices (the user's own key, every language) or natural neural voices synthesised by
+ *    the API (Kokoro, English), played with expo-audio sentence by sentence; falls back to the most natural installed
+ *    voice for the user's language via expo-speech (never blindly the default compact voice).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { File, Paths } from 'expo-file-system';
@@ -11,8 +12,10 @@ import * as Speech from 'expo-speech';
 import { AudioModule, createAudioPlayer, RecordingPresets, setAudioModeAsync, useAudioRecorder, useAudioRecorderState, type AudioPlayer } from 'expo-audio';
 import type { VoicePref } from '@muse/core/avatar';
 import type { VoiceConfig } from '@muse/core/client';
-import { type DeviceVoiceLike, naturalPlayback, naturalVoiceSpeaks, pickDeviceVoice, rankDeviceVoices, speakableText, splitForSpeech } from '@muse/core/voice';
+import { speechLocale } from '@muse/core/i18n';
+import { chooseTtsEngine, type DeviceVoiceLike, naturalPlayback, pickDeviceVoice, rankDeviceVoices, speakableText, splitForSpeech, type TtsEngine } from '@muse/core/voice';
 import { api } from './api';
+import { inCall } from './call';
 
 // ---------- server voice config ----------
 let configPromise: Promise<VoiceConfig | null> | null = null;
@@ -36,23 +39,24 @@ export function deviceVoices(): Promise<DeviceVoiceLike[]> {
   }
   return voicesPromise;
 }
-export async function rankedDeviceVoices(lang: string) { return rankDeviceVoices(await deviceVoices(), lang); }
+export async function rankedDeviceVoices(lang: string) { return rankDeviceVoices(await deviceVoices(), speechLocale(lang)); }
 
 type Level = (v: number) => void;
-interface Engine { kind: 'natural' | 'device'; speak(text: string, onLevel: Level): Promise<void>; stop(): void }
+interface Engine { kind: TtsEngine; speak(text: string, onLevel: Level): Promise<void>; stop(): void }
 
 class DeviceEngine implements Engine {
   readonly kind = 'device' as const;
   constructor(private pref: VoicePref, private lang: string) {}
   stop() { void Speech.stop(); }
   async speak(text: string, onLevel: Level) {
-    const voice = pickDeviceVoice(await deviceVoices(), this.lang, this.pref.voiceId);
+    const locale = speechLocale(this.lang);
+    const voice = pickDeviceVoice(await deviceVoices(), locale, this.pref.voiceId);
     let level = 0;
     const timer = setInterval(() => { level *= 0.75; onLevel(level); }, 50);
     await new Promise<void>((resolve) => {
       const done = () => { clearInterval(timer); onLevel(0); resolve(); };
       Speech.speak(speakableText(text).slice(0, 1500), {
-        language: voice?.lang ?? this.lang, rate: this.pref.rate, pitch: this.pref.pitch, voice: voice?.id,
+        language: voice?.lang ?? locale, rate: this.pref.rate, pitch: this.pref.pitch, voice: voice?.id,
         onBoundary: () => { level = 0.9; },
         onStart: () => { level = 0.6; },
         onDone: done, onStopped: done, onError: done,
@@ -61,16 +65,18 @@ class DeviceEngine implements Engine {
   }
 }
 
-class NaturalEngine implements Engine {
-  readonly kind = 'natural' as const;
+class ServerEngine implements Engine {
   private gen = 0;
   private player: AudioPlayer | null = null;
-  constructor(private pref: VoicePref) {}
+  constructor(private pref: VoicePref, readonly kind: 'natural' | 'elevenlabs' = 'natural', private lang = 'en') {}
   stop() { this.gen++; try { this.player?.pause(); this.player?.remove(); } catch { /* gone */ } this.player = null; }
 
   private async fetchChunk(text: string, speed: number, n: number): Promise<string> {
-    const { audio } = await api.tts(text, this.pref.naturalVoice, speed);
-    const f = new File(Paths.cache, `freemuse-tts-${n % 4}.wav`);
+    const el = this.kind === 'elevenlabs';
+    const { audio } = el
+      ? await api.tts(text, this.pref.elevenVoice, speed, { engine: 'elevenlabs', lang: this.lang, model: this.pref.elevenModel })
+      : await api.tts(text, this.pref.naturalVoice, speed);
+    const f = new File(Paths.cache, `freemuse-tts-${n % 4}.${el ? 'mp3' : 'wav'}`);
     if (f.exists) f.delete();
     f.create();
     await f.write(new Uint8Array(audio));
@@ -81,8 +87,9 @@ class NaturalEngine implements Engine {
     const my = ++this.gen;
     const chunks = splitForSpeech(text);
     if (!chunks.length) return;
-    const { synthSpeed, playbackRate } = naturalPlayback(this.pref.rate, this.pref.pitch);
-    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
+    const { synthSpeed, playbackRate } = this.kind === 'elevenlabs' ? { synthSpeed: this.pref.rate, playbackRate: 1 } : naturalPlayback(this.pref.rate, this.pref.pitch);
+    // During a call the call screen owns the audio session (speaker/earpiece, recording).
+    if (!inCall()) await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
     let next: Promise<string> | null = this.fetchChunk(chunks[0]!, synthSpeed, 0);
     for (let i = 0; i < chunks.length; i++) {
       let uri: string;
@@ -119,15 +126,29 @@ class NaturalEngine implements Engine {
   }
 }
 
+export function engineFor(pref: VoicePref, lang: string, cfg: VoiceConfig | null): TtsEngine {
+  return chooseTtsEngine(pref.provider, lang, { elevenlabs: !!cfg?.elevenlabs?.configured, natural: !!cfg?.natural.available });
+}
 function createEngine(pref: VoicePref, lang: string, cfg: VoiceConfig | null): Engine {
-  const natural = !!cfg?.natural.available && pref.provider !== 'device' && (pref.provider === 'server' || naturalVoiceSpeaks(lang));
-  return natural ? new NaturalEngine(pref) : new DeviceEngine(pref, lang);
+  const e = engineFor(pref, lang, cfg);
+  return e === 'device' ? new DeviceEngine(pref, lang) : new ServerEngine(pref, e, lang);
+}
+
+/** ElevenLabs → local natural voice (English) → device voice. */
+async function speakWithFallback(e: Engine, pref: VoicePref, lang: string, cfg: VoiceConfig | null, text: string, onLevel: Level): Promise<TtsEngine> {
+  try { await e.speak(text, onLevel); return e.kind; } catch {
+    if (e.kind === 'elevenlabs' && cfg?.natural.available && lang === 'en') {
+      try { await new ServerEngine(pref, 'natural', lang).speak(text, onLevel); return 'natural'; } catch { /* fall through */ }
+    }
+    await new DeviceEngine(pref, lang).speak(text, onLevel);
+    return 'device';
+  }
 }
 
 /** One-off preview (avatar screen, onboarding). */
-export async function previewVoice(pref: VoicePref, lang: string, text: string, onLevel: Level = () => {}): Promise<'natural' | 'device'> {
-  const e = createEngine(pref, lang, await loadVoiceConfig());
-  try { await e.speak(text, onLevel); return e.kind; } catch { await new DeviceEngine(pref, lang).speak(text, onLevel); return 'device'; }
+export async function previewVoice(pref: VoicePref, lang: string, text: string, onLevel: Level = () => {}): Promise<TtsEngine> {
+  const cfg = await loadVoiceConfig();
+  return speakWithFallback(createEngine(pref, lang, cfg), pref, lang, cfg, text, onLevel);
 }
 
 export function useSpeech(pref: VoicePref, lang: string) {
@@ -142,16 +163,14 @@ export function useSpeech(pref: VoicePref, lang: string) {
     e.stop();
     setSpeaking(true);
     try {
-      await e.speak(text, (v) => { mouth.current = v; });
-    } catch {
-      await new DeviceEngine(pref, lang).speak(text, (v) => { mouth.current = v; });
+      await speakWithFallback(e, pref, lang, cfg, text, (v) => { mouth.current = v; });
     } finally {
       mouth.current = 0;
       setSpeaking(false);
     }
   }, [pref, lang, cfg]);
   const stop = useCallback(() => { engine.current?.stop(); void Speech.stop(); mouth.current = 0; setSpeaking(false); }, []);
-  return { speak, stop, speaking, mouth, engine: engine.current?.kind ?? (cfg?.natural.available ? 'natural' : 'device') };
+  return { speak, stop, speaking, mouth, engine: engine.current?.kind ?? engineFor(pref, lang, cfg) };
 }
 
 export function useListener(lang: string) {
@@ -174,8 +193,8 @@ export function useListener(lang: string) {
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     if (!recorder.uri) return '';
     const b64 = await new File(recorder.uri).base64();
-    const { text } = await api.transcribe(b64, 'audio/m4a');
+    const { text } = await api.transcribe(b64, 'audio/m4a', lang);
     return text;
-  }, [recorder]);
+  }, [recorder, lang]);
   return { start, stop, listening, level, lang };
 }

@@ -6,7 +6,7 @@ import type {
   Approval, AuditEvent, ChatMessage, Connection, ConnectorInfo, Memory, StreamEvent, Task, UserSettings,
 } from './schemas';
 import type { AvatarSettings } from './avatar/config';
-import type { NaturalVoice } from './voice';
+import type { ElevenVoice, NaturalVoice } from './voice';
 
 export interface ClientOptions {
   baseUrl: string;
@@ -30,16 +30,33 @@ export interface Me {
   avatar: AvatarSettings;
   settings: UserSettings;
   onboarded: boolean;
+  /** What this server allows. */
+  features?: { contributorMode: boolean };
 }
 
 export interface VoiceConfig {
   stt: boolean;
   tts: string;
   natural: { available: boolean; status: string; languages: readonly string[]; voices: readonly NaturalVoice[] };
+  /** The user's own ElevenLabs key (stored encrypted on the server). */
+  elevenlabs?: { configured: boolean; keyHint: string | null };
+}
+
+export interface TtsOptions {
+  /** 'elevenlabs' uses the user's ElevenLabs key; otherwise the server's natural voice. */
+  engine?: 'elevenlabs' | 'natural';
+  /** UI language (ElevenLabs language enforcement). */
+  lang?: string;
+  /** ElevenLabs model id. */
+  model?: string;
 }
 
 export class MuseClient {
   constructor(private opts: ClientOptions) {}
+
+  get baseUrl(): string { return this.opts.baseUrl; }
+  /** Point the client at another server (mobile/desktop: the user enters their server address). */
+  setBaseUrl(url: string) { this.opts.baseUrl = url.replace(/\/+$/, ''); }
 
   private async headers(json = true): Promise<Record<string, string>> {
     const h: Record<string, string> = { 'x-muse-client': this.opts.clientName ?? 'web' };
@@ -63,7 +80,7 @@ export class MuseClient {
   }
 
   // auth
-  signup(input: { email: string; password: string; birthDate: string; acceptTerms: true }) {
+  signup(input: { email: string; password: string; birthDate: string; acceptTerms: true; language?: 'en' | 'it' | 'de' | 'fr' | 'es' }) {
     return this.req<{ token: string; me: Me }>('POST', '/v1/auth/signup', input);
   }
   login(email: string, password: string) {
@@ -78,8 +95,9 @@ export class MuseClient {
     const q = before ? `?before=${encodeURIComponent(before)}` : '';
     return this.req<{ messages: ChatMessage[] }>('GET', `/v1/conversations/${conversationId}/messages${q}`);
   }
-  send(text: string, conversationId = 'default', attachments: { fileId: string }[] = []) {
-    return this.req<{ message: ChatMessage; turnId: string }>('POST', `/v1/conversations/${conversationId}/messages`, { text, attachments });
+  /** channel 'voice' tells the agent it is on a voice call (short, spoken replies). */
+  send(text: string, conversationId = 'default', attachments: { fileId: string }[] = [], channel: 'text' | 'voice' = 'text') {
+    return this.req<{ message: ChatMessage; turnId: string }>('POST', `/v1/conversations/${conversationId}/messages`, { text, attachments, channel });
   }
   uploadFile(name: string, mime: string, base64: string) {
     return this.req<{ fileId: string }>('POST', '/v1/files', { name, mime, base64 });
@@ -139,14 +157,18 @@ export class MuseClient {
   notifications() { return this.req<{ notifications: { id: string; title: string; body: string; url: string; read: boolean; createdAt: string }[] }>('GET', '/v1/notifications'); }
 
   // voice
-  transcribe(base64Audio: string, mime: string) { return this.req<{ text: string }>('POST', '/v1/voice/transcribe', { audio: base64Audio, mime }); }
+  transcribe(base64Audio: string, mime: string, language?: string) { return this.req<{ text: string }>('POST', '/v1/voice/transcribe', { audio: base64Audio, mime, language }); }
+  elevenlabsStatus() { return this.req<{ configured: boolean; keyHint: string | null }>('GET', '/v1/voice/elevenlabs'); }
+  saveElevenlabsKey(apiKey: string) { return this.req<{ ok: true; keyHint: string; voices: ElevenVoice[] }>('PUT', '/v1/voice/elevenlabs', { apiKey }); }
+  removeElevenlabsKey() { return this.req<{ ok: true }>('DELETE', '/v1/voice/elevenlabs'); }
+  elevenlabsVoices() { return this.req<{ voices: ElevenVoice[] }>('GET', '/v1/voice/elevenlabs/voices'); }
   voiceConfig() { return this.req<VoiceConfig>('GET', '/v1/voice/config'); }
   /** Natural-voice speech for one short chunk of text. Returns audio bytes and their MIME type. */
-  async tts(text: string, voice: string, speed = 1): Promise<{ audio: ArrayBuffer; mime: string }> {
+  async tts(text: string, voice: string, speed = 1, o: TtsOptions = {}): Promise<{ audio: ArrayBuffer; mime: string }> {
     const res = await fetch(this.opts.baseUrl + '/v1/voice/tts', {
       method: 'POST',
       headers: await this.headers(true),
-      body: JSON.stringify({ text, voice, speed }),
+      body: JSON.stringify({ text, voice, speed, engine: o.engine, lang: o.lang, model: o.model }),
       credentials: this.opts.credentials ?? 'include',
     });
     if (!res.ok) {

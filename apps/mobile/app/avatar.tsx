@@ -6,13 +6,15 @@ import { Avatar } from '../src/Avatar';
 import { useMuse } from '../src/store';
 import { useTheme } from '../src/theme';
 import { Button, Card, Field, Screen } from '../src/ui';
-import { type DeviceVoiceLike, isNiceDeviceVoice, naturalVoiceSpeaks } from '@muse/core/voice';
-import { previewVoice, rankedDeviceVoices, useVoiceConfig } from '../src/voice';
+import { fmt, speechLocale, strings, type Strings } from '@muse/core/i18n';
+import { DEFAULT_ELEVEN_VOICE, ELEVEN_DEFAULT_VOICES, ELEVEN_MODELS, type DeviceVoiceLike, type ElevenVoice, isNiceDeviceVoice, naturalVoiceSpeaks } from '@muse/core/voice';
+import { ElevenLabsCard } from '../src/ElevenLabsCard';
+import { loadVoiceConfig, previewVoice, rankedDeviceVoices, useVoiceConfig } from '../src/voice';
 
 const COLORS = ['#F3E7D3', '#F7D9C4', '#E8D5F2', '#CFE3F5', '#D7EBD3', '#F6E3A6', '#C9465A', '#6B4E31', '#8DB7D9'];
-const SLIDERS: (keyof AvatarSettings['personality'])[] = ['warmth', 'playfulness', 'verbosity', 'proactivity', 'formality'];
+const SLIDERS: (keyof AvatarSettings['personality'] & keyof Strings)[] = ['warmth', 'playfulness', 'verbosity', 'proactivity', 'formality'];
 
-function Options<T extends string>({ label, values, value, onChange }: { label: string; values: readonly T[]; value: T; onChange: (v: T) => void }) {
+function Options<T extends string>({ label, values, value, onChange, labels }: { label: string; values: readonly T[]; value: T; onChange: (v: T) => void; labels?: Partial<Record<T, string>> }) {
   const th = useTheme();
   return (
     <View style={{ gap: 6 }}>
@@ -21,7 +23,7 @@ function Options<T extends string>({ label, values, value, onChange }: { label: 
         {values.map((v) => (
           <Pressable key={v} accessibilityRole="radio" accessibilityState={{ selected: v === value }} onPress={() => onChange(v)}
             style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: v === value ? th.accent : th.border, backgroundColor: v === value ? th.surfaceAlt : th.surface }}>
-            <Text style={{ color: th.text, fontWeight: v === value ? '800' : '500' }}>{v}</Text>
+            <Text style={{ color: th.text, fontWeight: v === value ? '800' : '500' }}>{labels?.[v] ?? v}</Text>
           </Pressable>
         ))}
       </View>
@@ -77,7 +79,15 @@ export default function AvatarScreen() {
   const setO = (p: Partial<AvatarSettings['outfit']>) => setA({ ...a, outfit: { ...o, ...p } });
   const th = useTheme();
   const lang = s.me!.settings.language;
+  const t = strings(lang);
   const vcfg = useVoiceConfig();
+  const [elOk, setElOk] = useState(false);
+  const [elVoices, setElVoices] = useState<ElevenVoice[]>([]);
+  useEffect(() => { setElOk(!!vcfg?.elevenlabs?.configured); }, [vcfg]);
+  useEffect(() => {
+    if (!elOk) return;
+    void api.elevenlabsVoices().then((r) => setElVoices(r.voices)).catch(() => setElVoices(ELEVEN_DEFAULT_VOICES.map((d) => ({ id: d.id, name: d.name, category: 'premade', description: '', gender: d.gender }))));
+  }, [elOk]);
   const [devVoices, setDevVoices] = useState<DeviceVoiceLike[]>([]);
   const [trying, setTrying] = useState(false);
   useEffect(() => { void rankedDeviceVoices(lang).then(setDevVoices); }, [lang]);
@@ -87,52 +97,65 @@ export default function AvatarScreen() {
   const tryVoice = async (pref = v) => {
     setTrying(true);
     setPreview('speaking');
-    try { await previewVoice(pref, lang, `Hi, I'm ${a.name}! How can I help you today?`); } finally { setTrying(false); setPreview('happy'); }
+    try { await previewVoice(pref, lang, fmt(t.voicePreview, { name: a.name })); } finally { setTrying(false); setPreview('happy'); }
   };
-  const ENGINES = ['auto', 'server', 'device'] as const;
-  const ENGINE_LABEL = { auto: 'Automatic', server: 'Natural voice', device: 'Device voice' } as const;
+  const ENGINES = ['auto', 'elevenlabs', 'server', 'device'] as const;
+  const ENGINE_LABEL = { auto: t.engineAuto, elevenlabs: t.engineElevenlabs, server: t.engineServer, device: t.engineDevice };
+  const usesEleven = elOk && (v.provider === 'elevenlabs' || v.provider === 'auto');
+  const locale = speechLocale(lang);
   return (
     <Screen>
       <Card style={{ alignItems: 'center' }}>
         <Avatar settings={a} state={preview} size={180} />
-        <Options label="Preview" values={AVATAR_STATES} value={preview} onChange={setPreview} />
+        <Options label={t.preview} values={AVATAR_STATES} value={preview} onChange={setPreview} />
       </Card>
       <Card>
-        <Field label="Name" value={a.name} onChangeText={(name) => setA({ ...a, name })} maxLength={40} />
-        <Options label="Hat" values={HATS} value={o.hat} onChange={(hat) => setO({ hat })} />
-        {o.hat !== 'none' && <Colors label="Hat colour" value={o.hatColor} onChange={(hatColor) => setO({ hatColor })} />}
-        <Options label="Glasses" values={GLASSES} value={o.glasses} onChange={(glasses) => setO({ glasses })} />
-        <Options label="Scarf" values={SCARVES} value={o.scarf} onChange={(scarf) => setO({ scarf })} />
-        {o.scarf !== 'none' && <Colors label="Scarf colour" value={o.scarfColor} onChange={(scarfColor) => setO({ scarfColor })} />}
-        <Colors label="Hoodie colour" value={o.hoodieColor} onChange={(hoodieColor) => setO({ hoodieColor })} />
-        <Colors label="Fur tint" value={o.furTint} onChange={(furTint) => setO({ furTint })} />
+        <Field label={t.name} value={a.name} onChangeText={(name) => setA({ ...a, name })} maxLength={40} />
+        <Options label={t.hat} values={HATS} value={o.hat} onChange={(hat) => setO({ hat })} />
+        {o.hat !== 'none' && <Colors label={t.hatColour} value={o.hatColor} onChange={(hatColor) => setO({ hatColor })} />}
+        <Options label={t.glasses} values={GLASSES} value={o.glasses} onChange={(glasses) => setO({ glasses })} />
+        <Options label={t.scarf} values={SCARVES} value={o.scarf} onChange={(scarf) => setO({ scarf })} />
+        {o.scarf !== 'none' && <Colors label={t.scarfColour} value={o.scarfColor} onChange={(scarfColor) => setO({ scarfColor })} />}
+        <Colors label={t.hoodieColour} value={o.hoodieColor} onChange={(hoodieColor) => setO({ hoodieColor })} />
+        <Colors label={t.furTint} value={o.furTint} onChange={(furTint) => setO({ furTint })} />
       </Card>
       <Card>
-        {SLIDERS.map((k) => <Stepper key={k} label={k} value={a.personality[k]} onChange={(v) => setA({ ...a, personality: { ...a.personality, [k]: v } })} />)}
-        <Field label="Persona (style only)" value={a.persona} onChangeText={(persona) => setA({ ...a, persona })} multiline maxLength={1000} />
+        {SLIDERS.map((k) => <Stepper key={k} label={t[k]} value={a.personality[k]} onChange={(v) => setA({ ...a, personality: { ...a.personality, [k]: v } })} />)}
+        <Field label={t.persona} value={a.persona} onChangeText={(persona) => setA({ ...a, persona })} multiline maxLength={1000} />
       </Card>
       <Card>
-        <Text accessibilityRole="header" style={{ color: th.text, fontWeight: '800', fontSize: 17 }}>Voice</Text>
-        <Options label="How it speaks" values={ENGINES.map((e) => ENGINE_LABEL[e])} value={ENGINE_LABEL[v.provider]}
-          onChange={(label) => { const p = ENGINES.find((e) => ENGINE_LABEL[e] === label)!; setV(p === 'device' ? { provider: p, voiceId: v.voiceId || devVoices[0]?.id || '' } : { provider: p }); }} />
-        {v.provider !== 'device' && naturalOk && (
+        <Text accessibilityRole="header" style={{ color: th.text, fontWeight: '800', fontSize: 17 }}>{t.voice}</Text>
+        <Options label={fmt(t.howSpeaks, { name: a.name })} values={ENGINES} value={v.provider} labels={ENGINE_LABEL}
+          onChange={(p) => setV(p === 'device' ? { provider: p, voiceId: v.voiceId || devVoices[0]?.id || '' } : { provider: p })} />
+        <Text style={{ color: th.textMuted, fontSize: 13 }}>{({ auto: t.engineAutoHint, elevenlabs: t.engineElevenlabsHint, server: t.engineServerHint, device: t.engineDeviceHint } as const)[v.provider]}</Text>
+        {usesEleven && elVoices.length > 0 && (
           <>
-            <Options label="Natural voice" values={vcfg!.natural.voices.map((n) => n.label)} value={vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.label ?? 'Heart'}
-              onChange={(label) => setV({ naturalVoice: vcfg!.natural.voices.find((n) => n.label === label)!.id })} />
-            <Text style={{ color: th.textMuted, fontSize: 13 }}>{vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.description}{!naturalVoiceSpeaks(lang) ? ' · Natural voices speak English; in your language the best device voice is used.' : ''}</Text>
+            <Options label={t.elVoice} values={elVoices.slice(0, 16).map((e) => e.id)} value={v.elevenVoice || DEFAULT_ELEVEN_VOICE}
+              labels={Object.fromEntries(elVoices.map((e) => [e.id, e.name]))} onChange={(id) => setV({ elevenVoice: id })} />
+            <Text style={{ color: th.textMuted, fontSize: 13 }}>{t.elVoiceHint}</Text>
+            <Options label={t.elModel} values={ELEVEN_MODELS.map((m) => m.id)} value={v.elevenModel} labels={Object.fromEntries(ELEVEN_MODELS.map((m) => [m.id, t[m.labelKey]]))} onChange={(elevenModel) => setV({ elevenModel })} />
           </>
         )}
-        {v.provider !== 'device' && !naturalOk && <Text style={{ color: th.textMuted, fontSize: 13 }}>Natural voices are off on this server, so the most natural voice on this phone is used.</Text>}
-        {(v.provider === 'device' || !naturalOk || !naturalVoiceSpeaks(lang)) && devVoices.length > 0 && (
-          <Options label="Device voice (★ = natural)" values={devVoices.slice(0, 10).map((d) => `${isNiceDeviceVoice(d, lang) ? '★ ' : ''}${d.name}`)}
-            value={(() => { const d = devVoices.find((x) => x.id === v.voiceId) ?? devVoices[0]!; return `${isNiceDeviceVoice(d, lang) ? '★ ' : ''}${d.name}`; })()}
+        {v.provider === 'elevenlabs' && !elOk && <Text style={{ color: th.warning, fontSize: 13 }}>{t.elNotSetUp}</Text>}
+        {(v.provider === 'server' || (v.provider === 'auto' && !elOk)) && naturalOk && (
+          <>
+            <Options label={t.naturalVoices} values={vcfg!.natural.voices.map((n) => n.label)} value={vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.label ?? 'Heart'}
+              onChange={(label) => setV({ naturalVoice: vcfg!.natural.voices.find((n) => n.label === label)!.id })} />
+            <Text style={{ color: th.textMuted, fontSize: 13 }}>{vcfg!.natural.voices.find((n) => n.id === v.naturalVoice)?.description}{!naturalVoiceSpeaks(lang) ? ` · ${fmt(t.naturalEnglishOnly, { name: a.name })}` : ''}</Text>
+          </>
+        )}
+        {v.provider === 'server' && !naturalOk && <Text style={{ color: th.textMuted, fontSize: 13 }}>{fmt(t.naturalOff, { name: a.name })}</Text>}
+        {!usesEleven && (v.provider === 'device' || !naturalOk || !naturalVoiceSpeaks(lang)) && devVoices.length > 0 && (
+          <Options label={`${t.deviceVoice} (${t.deviceVoiceHint})`} values={devVoices.slice(0, 10).map((d) => `${isNiceDeviceVoice(d, locale) ? '★ ' : ''}${d.name}`)}
+            value={(() => { const d = devVoices.find((x) => x.id === v.voiceId) ?? devVoices[0]!; return `${isNiceDeviceVoice(d, locale) ? '★ ' : ''}${d.name}`; })()}
             onChange={(label) => { const d = devVoices.find((x) => label.endsWith(x.name)); if (d) setV({ voiceId: d.id }); }} />
         )}
-        <SpeedPitch label="Speed" value={v.rate} min={0.5} max={2} onChange={(rate) => setV({ rate })} />
-        <SpeedPitch label="Pitch (higher = cuter)" value={v.pitch} min={0.8} max={1.3} onChange={(pitch) => setV({ pitch })} />
-        <Button kind="secondary" label={trying ? 'Speaking…' : 'Try voice'} disabled={trying} onPress={() => void tryVoice()} />
+        <SpeedPitch label={t.speed} value={v.rate} min={0.5} max={2} onChange={(rate) => setV({ rate })} />
+        {!usesEleven && <SpeedPitch label={`${t.pitch} (${t.pitchHint})`} value={v.pitch} min={0.8} max={1.3} onChange={(pitch) => setV({ pitch })} />}
+        <Button kind="secondary" label={trying ? t.speaking : t.tryVoice} disabled={trying} onPress={() => void tryVoice()} />
       </Card>
-      <Button label="Save" disabled={!a.name.trim()} onPress={async () => { await api.saveAvatar(a); await refreshMe(); setPreview('happy'); }} />
+      {(v.provider === 'auto' || v.provider === 'elevenlabs') && <ElevenLabsCard name={a.name} onChange={() => void loadVoiceConfig(true).then((c) => setElOk(!!c?.elevenlabs?.configured))} />}
+      <Button label={t.save} disabled={!a.name.trim()} onPress={async () => { await api.saveAvatar(a); await refreshMe(); setPreview('happy'); }} />
     </Screen>
   );
 }

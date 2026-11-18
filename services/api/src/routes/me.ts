@@ -15,6 +15,7 @@ export async function loadMe(d: Deps, userId: string): Promise<Me> {
     onboarded: u.onboarded,
     avatar: { ...DEFAULT_AVATAR, ...u.avatar, personality: { ...DEFAULT_AVATAR.personality, ...u.avatar?.personality }, voice: normalizeVoicePref(u.avatar?.voice), outfit: { ...DEFAULT_AVATAR.outfit, ...u.avatar?.outfit } },
     settings: { ...DEFAULT_SETTINGS, ...u.settings },
+    features: { contributorMode: d.cfg.allowContributorMode },
   };
 }
 
@@ -24,12 +25,20 @@ const AvatarInput = z.object({
   name: z.string().trim().min(1).max(40),
   persona: z.string().max(1000),
   personality: z.object({ warmth: slider, playfulness: slider, verbosity: slider, proactivity: slider, formality: slider }),
-  voice: z.object({ provider: z.enum(['auto', 'device', 'server']), voiceId: z.string().max(200), naturalVoice: z.string().max(40).default('af_heart'), rate: z.number().min(0.5).max(2), pitch: z.number().min(0.5).max(2) }),
+  voice: z.object({
+    provider: z.enum(['auto', 'device', 'server', 'elevenlabs']), voiceId: z.string().max(200), naturalVoice: z.string().max(40).default('af_heart'),
+    elevenVoice: z.string().regex(/^[A-Za-z0-9]{0,32}$/).default(''), elevenModel: z.string().regex(/^[a-z0-9_]{1,40}$/).default('eleven_flash_v2_5'), rate: z.number().min(0.5).max(2), pitch: z.number().min(0.5).max(2) }),
   outfit: z.object({ hat: z.enum(HATS), hatColor: color, glasses: z.enum(GLASSES), scarf: z.enum(SCARVES), scarfColor: color, hoodieColor: color, furTint: color }),
 });
 
 const domain = z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/).max(253);
-const SettingsPatch = UserSettings.partial().extend({ allowedDomains: z.array(domain).max(200).optional(), blockedDomains: z.array(domain).max(200).optional() });
+const SettingsPatch = UserSettings.partial().omit({ contributorConsentAt: true }).extend({
+  allowedDomains: z.array(domain).max(200).optional(),
+  blockedDomains: z.array(domain).max(200).optional(),
+  language: z.enum(['en', 'it', 'de', 'fr', 'es']).optional(),
+  /** Must be true to turn Contributor mode on: the user explicitly agreed that Meta may use their data for training. */
+  contributorConsent: z.literal(true).optional(),
+});
 
 export function meRoutes(app: FastifyInstance, d: Deps) {
   const auth = { preHandler: app.auth };
@@ -53,9 +62,21 @@ export function meRoutes(app: FastifyInstance, d: Deps) {
     const p = SettingsPatch.safeParse(req.body);
     if (!p.success) return reply.code(400).send({ code: 'invalid', message: p.error.issues[0]?.message });
     const me = await loadMe(d, req.user!.id);
-    const next = { ...me.settings, ...p.data };
+    const { contributorConsent, ...patch } = p.data;
+    const next = { ...me.settings, ...patch };
+    if (patch.contributorMode === true && !me.settings.contributorMode) {
+      if (!d.cfg.allowContributorMode) return reply.code(403).send({ code: 'contributor_disabled', message: 'Contributor mode is disabled on this server' });
+      if (!contributorConsent) return reply.code(400).send({ code: 'consent_required', message: 'Contributor mode needs your explicit consent' });
+      next.contributorConsentAt = new Date().toISOString();
+    }
+    // Contributor mode and the training opt-out are two views of the same choice.
+    if (patch.contributorMode !== undefined) next.trainingOptOut = !next.contributorMode;
+    else if (patch.trainingOptOut === true) next.contributorMode = false;
+    if (!next.contributorMode) next.contributorConsentAt = null;
     await d.db.q('UPDATE users SET settings=$2 WHERE id=$1', [req.user!.id, next]);
-    await d.db.tx((c) => appendAudit(c, { userId: req.user!.id, kind: 'settings.changed', actor: 'user', summary: `Settings changed: ${Object.keys(p.data).join(', ')}`, data: p.data }));
+    await d.db.tx((c) => appendAudit(c, { userId: req.user!.id, kind: 'settings.changed', actor: 'user', summary: patch.contributorMode !== undefined
+      ? (next.contributorMode ? 'Contributor mode turned ON (user consented that Meta may use content for training)' : 'Contributor mode turned OFF')
+      : `Settings changed: ${Object.keys(patch).join(', ')}`, data: { ...patch, ...(next.contributorConsentAt ? { contributorConsentAt: next.contributorConsentAt } : {}) } }));
     return { settings: next };
   });
 

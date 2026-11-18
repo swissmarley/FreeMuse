@@ -155,3 +155,137 @@ export function pickDeviceVoice<T extends DeviceVoiceLike>(voices: T[], lang: st
   }
   return rankDeviceVoices(voices, lang)[0];
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// ElevenLabs (professional voices; the user brings their own API key, the free plan works)
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface ElevenModel { id: string; labelKey: 'elModelFlash' | 'elModelMultilingual' | 'elModelTurbo'; languageCode: boolean }
+
+/** Flash v2.5 is the default: lowest latency (best for calls), half the credits, 32 languages incl. it/de/fr/es. */
+export const ELEVEN_MODELS: readonly ElevenModel[] = [
+  { id: 'eleven_flash_v2_5', labelKey: 'elModelFlash', languageCode: true },
+  { id: 'eleven_turbo_v2_5', labelKey: 'elModelTurbo', languageCode: true },
+  { id: 'eleven_multilingual_v2', labelKey: 'elModelMultilingual', languageCode: false },
+] as const;
+export const DEFAULT_ELEVEN_MODEL = 'eleven_flash_v2_5';
+
+export function isElevenModel(id: string): boolean {
+  return ELEVEN_MODELS.some((m) => m.id === id);
+}
+
+/**
+ * Default ElevenLabs voices that every account has (usable on the free plan through the API). "Jessica" (playful,
+ * bright, warm) fits a cute assistant character; all of them speak every supported language with the
+ * multilingual models.
+ */
+export const ELEVEN_DEFAULT_VOICES: readonly { id: string; name: string; gender: 'female' | 'male' }[] = [
+  { id: 'cgSgspJ2msm6clMCkdW9', name: 'Jessica', gender: 'female' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', gender: 'female' },
+  { id: 'pFZP5JQG7iQjIQuC4Bdp', name: 'Lily', gender: 'female' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice', gender: 'female' },
+  { id: 'FGY2WhTYpPnrIDTdsKH5', name: 'Laura', gender: 'female' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', name: 'Matilda', gender: 'female' },
+  { id: 'SAz9YHcvj6GT2YYXdXww', name: 'River', gender: 'female' },
+  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie', gender: 'male' },
+  { id: 'TX3LPaxmHKxFdv7VOQHJ', name: 'Liam', gender: 'male' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', gender: 'male' },
+] as const;
+export const DEFAULT_ELEVEN_VOICE = 'cgSgspJ2msm6clMCkdW9';
+
+export interface ElevenVoice { id: string; name: string; category: string; description: string; gender?: string; accent?: string; previewUrl?: string }
+
+/** ElevenLabs voice ids are 20 alphanumeric characters. */
+export function isElevenVoiceId(id: string): boolean {
+  return /^[A-Za-z0-9]{16,32}$/.test(id);
+}
+
+export type TtsEngine = 'elevenlabs' | 'natural' | 'device';
+
+/**
+ * Which engine speaks, given the preference, language and what the server offers:
+ * ElevenLabs (when the user added a key) > local natural voice (English only) > best device voice.
+ */
+export function chooseTtsEngine(provider: string, lang: string, opts: { elevenlabs: boolean; natural: boolean }): TtsEngine {
+  if (provider === 'device') return 'device';
+  if (provider === 'elevenlabs') return opts.elevenlabs ? 'elevenlabs' : opts.natural && naturalVoiceSpeaks(lang) ? 'natural' : 'device';
+  if (provider === 'server') return opts.natural ? 'natural' : opts.elevenlabs ? 'elevenlabs' : 'device';
+  if (opts.elevenlabs) return 'elevenlabs';
+  return opts.natural && naturalVoiceSpeaks(lang) ? 'natural' : 'device';
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Voice-call turn taking (voice activity detection), shared by web and mobile
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface VadOptions {
+  /** Minimum absolute level (0..1) that counts as speech. */
+  minLevel: number;
+  /** Speech must be this many times louder than the background noise floor. */
+  ratio: number;
+  /** How long speech must last before it counts (ms). */
+  startMs: number;
+  /** Silence after speech that ends the turn (ms). */
+  endMs: number;
+  /** Ignore very short blips (ms of speech in total). */
+  minSpeechMs: number;
+}
+
+export const DEFAULT_VAD: VadOptions = { minLevel: 0.045, ratio: 3, startMs: 120, endMs: 850, minSpeechMs: 300 };
+/** While the assistant is talking, a barge-in needs to be clearly louder (its own voice may leak into the mic). */
+export const BARGE_IN_VAD: VadOptions = { minLevel: 0.12, ratio: 5, startMs: 280, endMs: 850, minSpeechMs: 300 };
+
+export type VadEvent = 'speech-start' | 'speech-end' | 'blip' | null;
+
+/**
+ * A tiny, dependency-free voice activity detector driven by level samples (peak amplitude 0..1) with timestamps.
+ * It adapts to background noise, needs speech to last a moment before it starts a turn, and ends the turn after a
+ * short pause, like a person on the phone.
+ */
+export class Vad {
+  floor = 0.01;
+  speaking = false;
+  private aboveSince: number | null = null;
+  private lastVoice = 0;
+  private speechStart = 0;
+  constructor(public opts: VadOptions = DEFAULT_VAD) {}
+
+  threshold(): number {
+    return Math.max(this.opts.minLevel, this.floor * this.opts.ratio);
+  }
+
+  reset() {
+    this.speaking = false;
+    this.aboveSince = null;
+  }
+
+  push(level: number, now: number): VadEvent {
+    const loud = level >= this.threshold();
+    // Track the noise floor only when nobody is talking (slowly up, quickly down).
+    if (!loud && !this.speaking) this.floor = level > this.floor ? this.floor * 0.98 + level * 0.02 : this.floor * 0.9 + level * 0.1;
+    this.floor = Math.min(0.2, Math.max(0.002, this.floor));
+    if (loud) {
+      this.lastVoice = now;
+      if (!this.speaking) {
+        this.aboveSince ??= now;
+        if (now - this.aboveSince >= this.opts.startMs) {
+          this.speaking = true;
+          this.speechStart = this.aboveSince;
+          return 'speech-start';
+        }
+      }
+      return null;
+    }
+    this.aboveSince = null;
+    if (this.speaking && now - this.lastVoice >= this.opts.endMs) {
+      this.speaking = false;
+      return this.lastVoice - this.speechStart >= this.opts.minSpeechMs ? 'speech-end' : 'blip';
+    }
+    return null;
+  }
+}
+
+/** Short replies the call uses while the agent works (picked so they don't repeat back to back). */
+export function pickFiller(i: number): 'callFiller1' | 'callFiller2' | 'callFiller3' {
+  return (['callFiller1', 'callFiller2', 'callFiller3'] as const)[i % 3]!;
+}

@@ -130,7 +130,12 @@ export const Connection = z.object({
 export type Connection = z.infer<typeof Connection>;
 
 export const UserSettings = z.object({
+  /** True unless the user turned Contributor mode on (kept for compatibility; derived from contributorMode). */
   trainingOptOut: z.boolean(),
+  /** Opt-in: use Meta's lower-cost Contributor-mode models; Meta may use the content for training. */
+  contributorMode: z.boolean(),
+  /** When the user gave explicit consent for Contributor mode (ISO time), or null. */
+  contributorConsentAt: z.string().nullable(),
   language: z.string(),
   theme: z.enum(['system', 'light', 'dark']),
   reducedMotion: z.boolean(),
@@ -143,6 +148,8 @@ export type UserSettings = z.infer<typeof UserSettings>;
 
 export const DEFAULT_SETTINGS: UserSettings = {
   trainingOptOut: true,
+  contributorMode: false,
+  contributorConsentAt: null,
   language: 'en',
   theme: 'system',
   reducedMotion: false,
@@ -157,6 +164,7 @@ export const SignupInput = z.object({
   password: z.string().min(10).max(200),
   birthDate: z.iso.date(),
   acceptTerms: z.literal(true),
+  language: z.enum(['en', 'it', 'de', 'fr', 'es']).optional(),
 });
 export type SignupInput = z.infer<typeof SignupInput>;
 
