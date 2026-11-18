@@ -1,5 +1,5 @@
 # Maestro flow (run on a simulator/emulator with the stack running: `pnpm --filter @muse/mobile e2e`)
-appId: local.personal.museclone
+appId: local.personal.freemuse
 ---
 - launchApp: { clearState: true }
 - tapOn: "Let's start"

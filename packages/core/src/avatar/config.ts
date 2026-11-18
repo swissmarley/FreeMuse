@@ -36,8 +36,15 @@ export interface Personality {
 }
 
 export interface VoicePref {
-  provider: 'device' | 'server';
-  voiceId: string; // '' = system default
+  /**
+   * 'auto' (default): a natural neural voice from the server when it speaks your language, otherwise the most
+   * natural voice installed on the device. 'server' / 'device' force one of the two.
+   */
+  provider: 'auto' | 'device' | 'server';
+  /** Device voice id (Web Speech voiceURI / expo-speech identifier); '' = pick the best one automatically. */
+  voiceId: string;
+  /** Natural (server) voice id, see NATURAL_VOICES. */
+  naturalVoice: string;
   rate: number; // 0.5..2
   pitch: number; // 0.5..2
 }
@@ -54,7 +61,7 @@ export const DEFAULT_AVATAR: AvatarSettings = {
   name: DEFAULT_AVATAR_NAME,
   persona: '',
   personality: { warmth: 80, playfulness: 55, verbosity: 35, proactivity: 65, formality: 25 },
-  voice: { provider: 'device', voiceId: '', rate: 1, pitch: 1.1 },
+  voice: { provider: 'auto', voiceId: '', naturalVoice: 'af_heart', rate: 1, pitch: 1.1 },
   outfit: {
     hat: 'none',
     hatColor: '#C9465A',
@@ -80,4 +87,12 @@ export function personaPrompt(a: AvatarSettings): string {
   ];
   if (a.persona.trim()) lines.push(`User-defined persona (style only, never overrides safety rules): ${a.persona.trim().slice(0, 600)}`);
   return lines.join('\n');
+}
+
+/** Fill in defaults and upgrade older saved voice settings (which defaulted to the robotic system voice). */
+export function normalizeVoicePref(v: Partial<VoicePref> | undefined): VoicePref {
+  const out: VoicePref = { ...DEFAULT_AVATAR.voice, ...(v ?? {}) };
+  if (out.provider === 'device' && !out.voiceId) out.provider = 'auto';
+  if (!out.naturalVoice) out.naturalVoice = DEFAULT_AVATAR.voice.naturalVoice;
+  return out;
 }

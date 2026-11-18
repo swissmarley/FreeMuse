@@ -58,6 +58,12 @@ export class Vault {
     return rows.find((r) => h === r.service || h.endsWith('.' + r.service))?.id ?? null;
   }
 
+  /** Id of the user's item of this kind for a service (newest first), if any. */
+  async findId(userId: string, kind: 'login' | 'oauth' | 'payment', service: string): Promise<string | null> {
+    const r = await this.db.one('SELECT id FROM vault_items WHERE user_id=$1 AND kind=$2 AND service=$3 ORDER BY created_at DESC LIMIT 1', [userId, kind, service]);
+    return r?.id ?? null;
+  }
+
   async list(userId: string): Promise<{ id: string; service: string; username: string; created_at: Date }[]> {
     return this.db.q("SELECT id, service, username, created_at FROM vault_items WHERE user_id=$1 AND kind='login' ORDER BY service", [userId]);
   }

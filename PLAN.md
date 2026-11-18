@@ -98,7 +98,7 @@ i. customization polish + mobile.
 | 1Password integration | Built-in vault (libsodium secretbox, envelope encryption, master key from env/KMS). The model never sees secrets. |
 | Muse Confidential VM (user-held key) | Not implemented. The vault's KEK is server-side. Documented. |
 | WhatsApp channel, AI glasses, "Spaces" | Out of scope. |
-| Server-side TTS | Model API has none. Default is on-device TTS (Web Speech API / expo-speech). Optional `TTS_PROVIDER=openai-compatible`. |
+| Server-side TTS | Model API has none. Default is local neural TTS (Kokoro-82M via kokoro-js, inside the API), falling back to the best ranked on-device voice. Optional `TTS_PROVIDER=openai-compatible` or `device`. |
 | Embeddings | Model API has none. `EMBEDDINGS_PROVIDER=hash` (local feature-hashing vectors in pgvector, plus Postgres full-text search hybrid) by default. Any OpenAI-compatible embeddings endpoint is configurable. |
 | Mascot "Jolly" artwork | An **original** stylised plush character (vector, drawn here, not traced from Meta art). If you drop your own artwork into `assets/avatar/`, it is used instead (`AVATAR_ASSET` in `packages/core/src/avatar/config.ts`). |
 | Computer-use (pixel) browsing | DOM/accessibility-snapshot browsing (more robust, cheaper, and works with muse-spark-1.3). |
@@ -119,7 +119,7 @@ PRIVACY.md.
 | e. connectors + vault + payments | done | API tests (scopes, revoke, encrypted vault, test-mode payments) |
 | f. background jobs + push | done | durable delayed jobs survive client close (e2e waits 70 s with no client), Web Push + Expo push wiring |
 | g. memory + proactive | done | extraction / forget tests; reflection + proactive jobs (scheduled) |
-| h. voice | done | realtime STT proxy + file STT (Meta), on-device TTS with lip-sync |
+| h. voice | done | realtime STT proxy + file STT (Meta), natural local TTS (Kokoro) with lip-sync, interactive voice mode |
 | i. customisation + mobile | done | avatar customiser (web + mobile), Expo app type-checks and bundles for Android |
 
 Deviations and what could not be verified here:

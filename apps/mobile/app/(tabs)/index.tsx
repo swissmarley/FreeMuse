@@ -4,7 +4,7 @@ import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, V
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import { resolveAvatarState } from '@muse/core/avatar';
+import { type Reaction, reactionForReply, resolveAvatarState, tapReaction } from '@muse/core/avatar';
 import { strings } from '@muse/core/i18n';
 import { api } from '../../src/api';
 import { Avatar } from '../../src/Avatar';
@@ -12,6 +12,7 @@ import { useMuse } from '../../src/store';
 import { useTheme } from '../../src/theme';
 import { Disclosure } from '../../src/ui';
 import { useListener, useSpeech } from '../../src/voice';
+import { VoiceMode } from '../../src/VoiceMode';
 
 export default function Chat() {
   const { s, send } = useMuse();
@@ -28,6 +29,9 @@ export default function Chat() {
   const listener = useListener(me.settings.language);
   const listRef = useRef<FlatList>(null);
   const spoken = useRef<string | null>(null);
+  const [reaction, setReaction] = useState<{ kind: Reaction; at: number } | null>(null);
+  const taps = useRef(0);
+  const reacted = useRef<string | null>(null);
 
   useEffect(() => { const a = setTimeout(() => setGreeting(false), 2600); const b = setInterval(() => setNow(Date.now()), 5000); return () => { clearTimeout(a); clearInterval(b); }; }, []);
   const last = s.messages.at(-1);
@@ -36,6 +40,14 @@ export default function Chat() {
     spoken.current = last.id;
     speech.speak(last.text);
   }, [voiceMode, last, speech]);
+
+  useEffect(() => {
+    if (!last || last.role === 'user' || reacted.current === last.id) return;
+    const first = reacted.current === null;
+    reacted.current = last.id;
+    if (!first && !voiceMode) setReaction({ kind: reactionForReply(last.text), at: Date.now() });
+  }, [last, voiceMode]);
+  const openVoice = () => { spoken.current = s.messages.at(-1)?.id ?? null; setVoiceMode(true); };
 
   const state = resolveAvatarState({ greeting, thinking: s.thinking, speaking: speech.speaking, justCompleted: now - s.completedAt < 3000, tasksRunning: s.tasksRunning, idleMs: 0 });
   const submit = async (v = text) => {
@@ -58,13 +70,14 @@ export default function Chat() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: th.bg }} edges={['top']}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: th.surfaceAlt, borderBottomColor: th.border, borderBottomWidth: 1 }}>
-        <Avatar settings={me.avatar} state={state} size={56} mouthRef={speech.speaking ? speech.mouth : undefined} reducedMotion={me.settings.reducedMotion} />
+        <Avatar settings={me.avatar} state={state} size={56} mouthRef={speech.speaking ? speech.mouth : undefined} reducedMotion={me.settings.reducedMotion}
+          reaction={reaction} onTap={() => setReaction({ kind: tapReaction(taps.current++).kind, at: Date.now() })} />
         <View style={{ flex: 1 }}>
           <Text accessibilityRole="header" style={{ fontSize: 18, fontWeight: '800', color: th.text }}>{me.avatar.name}</Text>
           <Text style={{ color: th.textMuted, fontSize: 13 }}>{s.thinking ? 'Thinking…' : s.tasksRunning ? `Working on ${s.tasksRunning} task(s)` : 'Here for you'}</Text>
         </View>
         {s.pendingApprovals > 0 && <Pressable accessibilityRole="button" onPress={() => router.push('/approvals')}><Text style={{ color: th.warning, fontWeight: '800' }}>{s.pendingApprovals} to approve</Text></Pressable>}
-        <Pressable accessibilityRole="button" accessibilityLabel="Voice mode" onPress={() => setVoiceMode((v) => !v)} style={{ padding: 8 }}><Text style={{ fontSize: 20 }}>{voiceMode ? '🔊' : '🎙'}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Voice mode" onPress={openVoice} style={{ padding: 8 }}><Text style={{ fontSize: 20 }}>🎙</Text></Pressable>
       </View>
       <Disclosure />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -89,6 +102,20 @@ export default function Chat() {
           <Pressable accessibilityRole="button" accessibilityLabel={t.send} onPress={() => void submit()} style={{ height: 46, paddingHorizontal: 16, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: th.accent }}><Text style={{ color: th.accentText, fontWeight: '800' }}>{t.send}</Text></Pressable>
         </View>
       </KeyboardAvoidingView>
+      <VoiceMode
+        visible={voiceMode}
+        avatar={me.avatar}
+        state={state}
+        reducedMotion={me.settings.reducedMotion}
+        speech={speech}
+        listener={listener}
+        lastReply={last && last.role !== 'user' ? { id: last.id, text: last.text } : null}
+        streamingText={s.streaming?.text}
+        thinking={s.thinking}
+        strings={{ listening: t.listening, holdToTalk: t.holdToTalk }}
+        onSay={(said) => submit(said)}
+        onClose={() => setVoiceMode(false)}
+      />
     </SafeAreaView>
   );
 }

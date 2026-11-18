@@ -22,7 +22,8 @@ COPY services services
 COPY apps/web apps/web
 COPY scripts scripts
 COPY infra/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# /models caches the natural voice model (a named volume inherits this owner).
+RUN chmod +x /entrypoint.sh && mkdir -p /models && chown node:node /models
 
 FROM base AS web
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000

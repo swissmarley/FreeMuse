@@ -60,6 +60,8 @@ services:
       REDIS_URL: redis://redis:6379
       SENTINEL_URL: http://sentinel:4100
       DATA_REGION: ${DATA_REGION:-eu}
+      TTS_CACHE_DIR: /models
+    volumes: [secrets:/secrets:ro, models:/models]
     ports: ["4000:4000"]
     networks: [backend, sandbox, egress]
 
@@ -107,3 +109,4 @@ volumes:
   pgdata: {}
   redisdata: {}
   secrets: {}
+  models: {}   # natural voice model (downloaded once, ~90 MB)

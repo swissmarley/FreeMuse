@@ -1,13 +1,16 @@
 /**
  * Voice: speech-to-text via Meta's muse-voice-transcribe-1.0 (file + realtime), proxied server-side so the API key
- * never reaches clients. TTS defaults to on-device synthesis (the Model API has no TTS); an OpenAI-compatible
- * /audio/speech endpoint can be configured instead.
+ * never reaches clients. TTS defaults to natural local neural voices (Kokoro, runs inside this process, free and
+ * private); an OpenAI-compatible /audio/speech endpoint (e.g. Kokoro-FastAPI, OpenAI) or on-device speech can be
+ * configured instead.
  */
 import { spawn } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import WebSocket from 'ws';
+import { NATURAL_VOICE_LANGS, NATURAL_VOICES } from '@muse/core/voice';
 import type { Deps } from '../deps.js';
+import { LocalTTS } from '../tts.js';
 
 export function toWav24k(input: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -46,7 +49,24 @@ const LANG_NAMES: Record<string, string> = { en: 'English', de: 'German', fr: 'F
 export function voiceRoutes(app: FastifyInstance, d: Deps) {
   const auth = { preHandler: app.auth };
 
-  app.get('/v1/voice/config', auth, async () => ({ stt: d.cfg.sttProvider !== 'none' && !!d.cfg.modelApiKey, tts: d.cfg.tts.provider }));
+  const t = d.cfg.tts;
+  const local = t.provider === 'local'
+    ? new LocalTTS({ modelId: t.model || 'onnx-community/Kokoro-82M-v1.0-ONNX', dtype: (t.dtype as 'q8') || 'q8', cacheDir: t.cacheDir })
+    : null;
+  // Warm the model in the background so the first reply in voice mode doesn't wait for the download.
+  if (local && t.preload && process.env.NODE_ENV !== 'test') void local.load().catch(() => {});
+  const naturalAvailable = () => (t.provider === 'openai-compatible' ? !!t.baseUrl : !!local && local.status !== 'error');
+
+  app.get('/v1/voice/config', auth, async () => ({
+    stt: d.cfg.sttProvider !== 'none' && !!d.cfg.modelApiKey,
+    tts: t.provider,
+    natural: {
+      available: naturalAvailable(),
+      status: local?.status ?? (naturalAvailable() ? 'ready' : 'off'),
+      languages: NATURAL_VOICE_LANGS,
+      voices: NATURAL_VOICES,
+    },
+  }));
 
   app.post('/v1/voice/transcribe', { ...auth, bodyLimit: 15 * 1024 * 1024, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     if (!d.cfg.modelApiKey || d.cfg.sttProvider === 'none') return reply.code(501).send({ code: 'stt_disabled', message: 'Speech-to-text is not configured' });
@@ -92,14 +112,24 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
     socket.on('close', () => up.close());
   });
 
-  app.post('/v1/voice/tts', { ...auth, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const t = d.cfg.tts;
+  app.post('/v1/voice/tts', { ...auth, config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const { text, voice, speed } = (req.body ?? {}) as { text?: string; voice?: string; speed?: number };
+    const input = String(text ?? '').slice(0, 1200);
+    if (!input.trim()) return reply.code(400).send({ code: 'invalid', message: 'text required' });
+    if (local) {
+      try {
+        const wav = await local.synth(input, String(voice ?? ''), Number(speed ?? 1));
+        reply.header('content-type', 'audio/wav').header('cache-control', 'private, max-age=3600');
+        return reply.send(wav);
+      } catch (e) {
+        return reply.code(503).send({ code: 'tts_unavailable', message: `Natural voice not ready: ${(e as Error).message.slice(0, 120)}` });
+      }
+    }
     if (t.provider !== 'openai-compatible' || !t.baseUrl) return reply.code(501).send({ code: 'device_tts', message: 'Use on-device speech synthesis' });
-    const { text, voice } = (req.body ?? {}) as { text?: string; voice?: string };
     const r = await fetch(`${t.baseUrl.replace(/\/$/, '')}/audio/speech`, {
       method: 'POST',
       headers: { authorization: `Bearer ${t.apiKey ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: t.model, input: String(text ?? '').slice(0, 4000), voice: voice || 'alloy', response_format: 'mp3' }),
+      body: JSON.stringify({ model: t.model, input, voice: t.voice || voice || 'af_heart', speed: Number(speed ?? 1), response_format: 'mp3' }),
     });
     if (!r.ok) return reply.code(502).send({ code: 'tts_failed', message: `TTS ${r.status}` });
     reply.header('content-type', 'audio/mpeg');

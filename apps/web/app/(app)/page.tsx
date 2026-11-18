@@ -2,13 +2,14 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BRAND } from '@muse/core/brand';
-import { resolveAvatarState } from '@muse/core/avatar';
+import { type Reaction, reactionForReply, resolveAvatarState, tapReaction } from '@muse/core/avatar';
 import { strings } from '@muse/core/i18n';
 import { Avatar } from '../../components/Avatar';
 import { RichText } from '../../components/RichText';
+import { VoiceMode } from '../../components/VoiceMode';
 import { api } from '../../lib/api';
 import { fmt, useMuse } from '../../lib/store';
-import { useListener, useSpeech } from '../../lib/voice';
+import { unlockAudio, useListener, useSpeech } from '../../lib/voice';
 
 export default function ChatPage() {
   const { s, send, toast } = useMuse();
@@ -26,6 +27,9 @@ export default function ChatPage() {
   const speech = useSpeech(me.avatar.voice, me.settings.language);
   const listener = useListener(me.settings.language);
   const spokenFor = useRef<string | null>(null);
+  const [reaction, setReaction] = useState<{ kind: Reaction; at: number } | null>(null);
+  const taps = useRef(0);
+  const reactedFor = useRef<string | null>(null);
 
   useEffect(() => { const id = setTimeout(() => setGreeting(false), 2600); return () => clearTimeout(id); }, []);
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);
@@ -38,6 +42,14 @@ export default function ChatPage() {
     spokenFor.current = lastMsg.id;
     void speech.speak(lastMsg.text);
   }, [voiceMode, lastMsg, speech]);
+
+  // Little reactions in the header too: to each new reply, and when you poke the character.
+  useEffect(() => {
+    if (!lastMsg || lastMsg.role === 'user' || reactedFor.current === lastMsg.id) return;
+    const first = reactedFor.current === null;
+    reactedFor.current = lastMsg.id;
+    if (!first && !voiceMode) setReaction({ kind: reactionForReply(lastMsg.text), at: performance.now() });
+  }, [lastMsg, voiceMode]);
 
   const state = resolveAvatarState({
     greeting, thinking: s.thinking, speaking: speech.speaking, justCompleted: now - s.completedAt < 3000,
@@ -71,6 +83,13 @@ export default function ChatPage() {
     } catch (e) { toast((e as Error).message); }
   };
 
+  const openVoice = () => {
+    unlockAudio();
+    // Only speak replies that arrive from now on, not the last one already on screen.
+    spokenFor.current = s.messages.at(-1)?.id ?? null;
+    setVoiceMode(true);
+  };
+
   const holdStart = async () => {
     try { speech.stop(); await listener.start(); } catch { toast('Microphone not available'); }
   };
@@ -85,7 +104,8 @@ export default function ChatPage() {
   return (
     <section className="chat" aria-label="Chat">
       <header className="chat-header">
-        <Avatar settings={me.avatar} state={state} size={64} mouthRef={speech.speaking ? speech.mouth : undefined} reducedMotion={me.settings.reducedMotion} />
+        <Avatar settings={me.avatar} state={state} size={64} mouthRef={speech.speaking ? speech.mouth : undefined} reducedMotion={me.settings.reducedMotion}
+          reaction={reaction} onTap={voiceMode ? undefined : () => { setLastActive(Date.now()); setReaction({ kind: tapReaction(taps.current++).kind, at: performance.now() }); }} />
         <div style={{ flex: 1 }}>
           <h1>{me.avatar.name}</h1>
           <div className="muted" style={{ fontSize: '.85rem' }} aria-live="polite">
@@ -93,7 +113,7 @@ export default function ChatPage() {
           </div>
         </div>
         {pendingNote ? <Link className="chip warn" href="/approvals">{pendingNote}</Link> : null}
-        <button className="btn secondary" onClick={() => setVoiceMode(true)} aria-label="Start voice mode">🎙 Voice</button>
+        <button className="btn secondary" onClick={openVoice} aria-label="Start voice mode">🎙 Voice</button>
       </header>
       <p className="disclosure">{BRAND.aiDisclosure}</p>
 
@@ -145,22 +165,20 @@ export default function ChatPage() {
       </div>
 
       {voiceMode && (
-        <div className="voice-overlay" role="dialog" aria-modal="true" aria-label="Voice mode">
-          <div className="stack" style={{ alignItems: 'center' }}>
-            <Avatar settings={me.avatar} state={listener.listening ? 'thinking' : state} size={220} mouthRef={speech.mouth} reducedMotion={me.settings.reducedMotion} />
-            <p style={{ minHeight: 48, maxWidth: 520 }} aria-live="polite">{listener.listening ? listener.partial || t.listening : s.streaming?.text?.slice(-240) || 'Hold the button and talk to me.'}</p>
-            <div className="progress" style={{ width: 200 }} aria-hidden><div style={{ width: `${Math.round(listener.level * 100)}%` }} /></div>
-            <div className="row">
-              <button className={`btn ${listener.listening ? 'danger' : ''}`} style={{ minWidth: 180, minHeight: 64 }}
-                onPointerDown={() => void holdStart()} onPointerUp={() => void holdEnd()}
-                onKeyDown={(e) => { if (e.key === ' ' && !listener.listening) { e.preventDefault(); void holdStart(); } }} onKeyUp={(e) => { if (e.key === ' ') void holdEnd(); }}>
-                {listener.listening ? t.listening : t.holdToTalk}
-              </button>
-              <button className="btn ghost" onClick={() => { speech.stop(); setVoiceMode(false); }}>Close</button>
-            </div>
-            <p className="disclosure">{BRAND.aiDisclosure}</p>
-          </div>
-        </div>
+        <VoiceMode
+          avatar={me.avatar}
+          state={state}
+          reducedMotion={me.settings.reducedMotion}
+          speech={speech}
+          listener={listener}
+          lastReply={lastMsg && lastMsg.role !== 'user' ? { id: lastMsg.id, text: lastMsg.text } : null}
+          streamingText={s.streaming?.text}
+          thinking={s.thinking}
+          strings={{ listening: t.listening, holdToTalk: t.holdToTalk }}
+          onSay={(said) => submit(said)}
+          onClose={() => setVoiceMode(false)}
+          onMicError={() => toast('Microphone not available')}
+        />
       )}
     </section>
   );

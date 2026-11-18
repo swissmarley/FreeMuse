@@ -4,13 +4,27 @@
  * working, sleeping. Honours the OS "reduce motion" setting.
  */
 import { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Image, View } from 'react-native';
+import { AccessibilityInfo, Image, Pressable, View } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, Path, RadialGradient, Stop } from 'react-native-svg';
-import { AVATAR_ASSET, type AvatarSettings, type AvatarState, buildAvatar, nextBlinkDelay, VIEWBOX } from '@muse/core/avatar';
+import { AVATAR_ASSET, type AvatarSettings, type AvatarState, buildAvatar, nextBlinkDelay, type Reaction, VIEWBOX } from '@muse/core/avatar';
 
-const LABEL: Record<AvatarState, string> = { idle: 'relaxing', wave: 'waving hello', thinking: 'thinking', speaking: 'speaking', happy: 'happy', working: 'working on your tasks', sleeping: 'sleeping' };
+const LABEL: Record<AvatarState, string> = { idle: 'relaxing', wave: 'waving hello', listening: 'listening to you', thinking: 'thinking', speaking: 'speaking', happy: 'happy', working: 'working on your tasks', sleeping: 'sleeping' };
 
-export function Avatar({ settings, state, size = 120, mouthRef, reducedMotion }: { settings: AvatarSettings; state: AvatarState; size?: number; mouthRef?: { current: number }; reducedMotion?: boolean }) {
+export interface AvatarProps {
+  settings: AvatarSettings;
+  state: AvatarState;
+  size?: number;
+  mouthRef?: { current: number };
+  /** 0..1 microphone level while listening. */
+  levelRef?: { current: number };
+  /** One-off reaction; `at` is a Date.now() timestamp. */
+  reaction?: { kind: Reaction; at: number } | null;
+  /** Makes the character tappable. */
+  onTap?: () => void;
+  reducedMotion?: boolean;
+}
+
+export function Avatar({ settings, state, size = 120, mouthRef, levelRef, reaction, onTap, reducedMotion }: AvatarProps) {
   const [sysReduced, setSysReduced] = useState(false);
   const [t, setT] = useState(0);
   const start = useRef(Date.now());
@@ -38,9 +52,14 @@ export function Avatar({ settings, state, size = 120, mouthRef, reducedMotion }:
   }
   let mouth = mouthRef?.current ?? 0;
   if (state === 'speaking' && !mouthRef) mouth = (Math.sin(t / 70) + 1) / 2;
-  const m = buildAvatar(settings, { state, t, sinceBlink: blinkAt.current < 0 ? -1 : t - blinkAt.current, mouth, reducedMotion: reduced });
+  const m = buildAvatar(settings, {
+    state, t, sinceBlink: blinkAt.current < 0 ? -1 : t - blinkAt.current, mouth, reducedMotion: reduced,
+    level: levelRef?.current ?? 0,
+    reaction: reaction ? { kind: reaction.kind, since: Date.now() - reaction.at } : undefined,
+  });
+  const Wrap = onTap ? Pressable : View;
   return (
-    <View accessible accessibilityRole="image" accessibilityLabel={label}>
+    <Wrap accessible accessibilityRole={onTap ? 'button' : 'image'} accessibilityLabel={onTap ? `${label}. Tap to play with ${settings.name}.` : label} {...(onTap ? { onPress: onTap } : {})}>
       <Svg width={size} height={(size * VIEWBOX.h) / VIEWBOX.w} viewBox={`-10 -14 ${VIEWBOX.w + 20} ${VIEWBOX.h + 20}`}>
         <Defs>
           {m.gradients.map((g) => (
@@ -58,6 +77,6 @@ export function Avatar({ settings, state, size = 120, mouthRef, reducedMotion }:
           })}
         </G>
       </Svg>
-    </View>
+    </Wrap>
   );
 }

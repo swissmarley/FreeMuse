@@ -4,7 +4,8 @@ import { type AvatarSettings, type AvatarState, AVATAR_STATES, GLASSES, HATS, SC
 import { Avatar } from '../../../components/Avatar';
 import { api } from '../../../lib/api';
 import { useMuse } from '../../../lib/store';
-import { DeviceTTS } from '../../../lib/voice';
+import { isNiceDeviceVoice, naturalVoiceSpeaks, rankDeviceVoices } from '@muse/core/voice';
+import { asVoiceLike, deviceVoices, previewVoice, useVoiceConfig } from '../../../lib/voice';
 
 const COLORS = ['#F3E7D3', '#F7D9C4', '#E8D5F2', '#CFE3F5', '#D7EBD3', '#F6E3A6', '#C9465A', '#6B4E31', '#3A2A1B', '#8DB7D9'];
 const SLIDERS: { key: keyof AvatarSettings['personality']; label: string; lo: string; hi: string }[] = [
@@ -30,12 +31,25 @@ export default function AvatarPage() {
   const [preview, setPreview] = useState<AvatarState>('wave');
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [saving, setSaving] = useState(false);
+  const [trying, setTrying] = useState<string | null>(null);
+  const vcfg = useVoiceConfig();
+  const lang = s.me!.settings.language;
   useEffect(() => {
+    void deviceVoices().then(setVoices);
     const load = () => setVoices(window.speechSynthesis?.getVoices() ?? []);
-    load();
     window.speechSynthesis?.addEventListener?.('voiceschanged', load);
     return () => window.speechSynthesis?.removeEventListener?.('voiceschanged', load);
   }, []);
+  const ranked = rankDeviceVoices(voices.map(asVoiceLike), lang);
+  const naturalOk = !!vcfg?.natural.available;
+  const naturalForLang = naturalOk && naturalVoiceSpeaks(lang);
+  const v = a.voice;
+  const setV = (patch: Partial<AvatarSettings['voice']>) => setA({ ...a, voice: { ...v, ...patch } });
+  const tryVoice = async (pref: AvatarSettings['voice'], id: string) => {
+    setTrying(id);
+    setPreview('speaking');
+    try { await previewVoice(pref, lang, `Hi, I'm ${a.name}! How can I help you today?`); } finally { setTrying(null); setPreview('happy'); }
+  };
   const o = a.outfit;
   const setO = (patch: Partial<AvatarSettings['outfit']>) => setA({ ...a, outfit: { ...o, ...patch } });
   const save = async () => {
@@ -77,13 +91,51 @@ export default function AvatarPage() {
         </section>
         <section className="card stack" aria-label="Voice">
           <h2 style={{ fontSize: '1.05rem', margin: 0 }}>Voice</h2>
-          <label className="field">Voice<select className="input" value={a.voice.voiceId} onChange={(e) => setA({ ...a, voice: { ...a.voice, voiceId: e.target.value } })}>
-            <option value="">System default</option>
-            {voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
-          </select></label>
-          <label className="field">Speed<input type="range" min={0.5} max={2} step={0.05} value={a.voice.rate} onChange={(e) => setA({ ...a, voice: { ...a.voice, rate: Number(e.target.value) } })} /></label>
-          <label className="field">Pitch<input type="range" min={0.5} max={2} step={0.05} value={a.voice.pitch} onChange={(e) => setA({ ...a, voice: { ...a.voice, pitch: Number(e.target.value) } })} /></label>
-          <button type="button" className="btn secondary" onClick={() => { setPreview('speaking'); void new DeviceTTS(a.voice, s.me!.settings.language).speak(`Hi, I'm ${a.name}! How can I help today?`, () => {}).then(() => setPreview('idle')); }}>Try voice</button>
+          <div className="field"><span>How {a.name} speaks</span>
+            <div className="row" role="radiogroup" aria-label="Voice engine">
+              {([
+                ['auto', 'Automatic', 'Natural voice when possible'],
+                ['server', 'Natural voice', 'Human-like, generated privately on your server'],
+                ['device', 'Device voice', 'Uses the voices installed on this device'],
+              ] as const).map(([id, label, hint]) => (
+                <button key={id} type="button" role="radio" aria-checked={v.provider === id} title={hint} className={`chip ${v.provider === id ? 'ok' : ''}`}
+                  onClick={() => setV(id === 'device' ? { provider: id, voiceId: v.voiceId || ranked[0]?.id || '' } : { provider: id })}>{label}</button>
+              ))}
+            </div>
+          </div>
+          {v.provider !== 'device' && (
+            naturalOk ? (
+              <div className="field"><span>Natural voices</span>
+                {!naturalForLang && <span className="hint">{v.provider === 'server' ? 'Natural voices speak English only, so they will have an English accent in your language.' : `Natural voices speak English. In your language, ${a.name} uses the best voice on your device.`}</span>}
+                <div className="voice-grid" role="radiogroup" aria-label="Natural voice">
+                  {vcfg!.natural.voices.map((nv) => (
+                    <div key={nv.id} className={`voice-card ${v.naturalVoice === nv.id ? 'on' : ''}`}>
+                      <button type="button" role="radio" aria-checked={v.naturalVoice === nv.id} className="voice-pick" onClick={() => setV({ naturalVoice: nv.id })}>
+                        <strong>{nv.label}</strong> <span className="muted">{nv.gender === 'female' ? '♀' : '♂'}</span><br /><span className="hint">{nv.description}</span>
+                      </button>
+                      <button type="button" className="icon-btn" aria-label={`Play ${nv.label}`} disabled={!!trying} onClick={() => void tryVoice({ ...v, provider: 'server', naturalVoice: nv.id }, nv.id)}>{trying === nv.id ? '…' : '▶'}</button>
+                    </div>
+                  ))}
+                </div>
+                {vcfg!.natural.status === 'loading' && <span className="hint">The voice model is still downloading on your server (one time, about 90 MB). Until it&apos;s ready, the device voice is used.</span>}
+              </div>
+            ) : (
+              <p className="hint" style={{ margin: 0 }}>Natural voices are turned off on this server (set <code>TTS_PROVIDER=local</code>). {a.name} uses the most natural voice installed on this device.</p>
+            )
+          )}
+          {(v.provider === 'device' || !naturalForLang) && (
+            <label className="field">Device voice
+              <span className="hint">★ = sounds natural. Best voices are listed first.</span>
+              <select className="input" value={v.provider === 'device' ? v.voiceId : v.voiceId || ''} onChange={(e) => setV({ voiceId: e.target.value })}>
+                {v.provider !== 'device' && <option value="">Best available (automatic)</option>}
+                {ranked.map((x) => <option key={x.id} value={x.id}>{isNiceDeviceVoice(x, lang) ? '★ ' : ''}{x.name} ({x.lang})</option>)}
+              </select>
+              {ranked.length > 0 && !ranked.some((x) => isNiceDeviceVoice(x, lang)) && <span className="hint">This device only has basic voices for your language. On Linux, try Chrome or Edge (they include natural online voices), or switch to a natural voice.</span>}
+            </label>
+          )}
+          <label className="field">Speed<input type="range" min={0.5} max={2} step={0.05} value={v.rate} onChange={(e) => setV({ rate: Number(e.target.value) })} aria-valuetext={`${v.rate.toFixed(2)}×`} /></label>
+          <label className="field">Pitch<span className="hint">A little higher sounds cuter.</span><input type="range" min={0.8} max={1.3} step={0.05} value={v.pitch} onChange={(e) => setV({ pitch: Number(e.target.value) })} aria-valuetext={`${v.pitch.toFixed(2)}`} /></label>
+          <button type="button" className="btn secondary" disabled={!!trying} onClick={() => void tryVoice(v, 'current')}>{trying === 'current' ? 'Speaking…' : 'Try voice'}</button>
         </section>
       </div>
       <div className="row" style={{ position: 'sticky', bottom: 80, marginTop: 20 }}>

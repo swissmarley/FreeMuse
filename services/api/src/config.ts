@@ -20,7 +20,8 @@ export interface ApiConfig {
   modelApiKey?: string;
   llmBaseUrl: string;
   sttProvider: string;
-  tts: { provider: string; baseUrl?: string; apiKey?: string; model?: string };
+  /** provider: 'local' (natural Kokoro voices inside the API, default) | 'openai-compatible' | 'device' (on-device only). */
+  tts: { provider: string; baseUrl?: string; apiKey?: string; model?: string; voice?: string; dtype?: string; cacheDir?: string; preload?: boolean };
   secureCookies: boolean;
 }
 
@@ -53,7 +54,16 @@ export function loadConfig(): ApiConfig {
     modelApiKey: process.env.MODEL_API_KEY || undefined,
     llmBaseUrl: process.env.LLM_BASE_URL ?? 'https://api.meta.ai/v1',
     sttProvider: process.env.STT_PROVIDER ?? 'meta',
-    tts: { provider: process.env.TTS_PROVIDER ?? 'device', baseUrl: process.env.TTS_BASE_URL, apiKey: process.env.TTS_API_KEY, model: process.env.TTS_MODEL },
+    tts: {
+      provider: (process.env.TTS_PROVIDER || 'local').replace(/^kokoro$/, 'local'),
+      baseUrl: process.env.TTS_BASE_URL || undefined,
+      apiKey: process.env.TTS_API_KEY || undefined,
+      model: process.env.TTS_MODEL || undefined,
+      voice: process.env.TTS_VOICE || undefined,
+      dtype: process.env.TTS_DTYPE || 'q8',
+      cacheDir: process.env.TTS_CACHE_DIR || undefined,
+      preload: process.env.TTS_PRELOAD !== 'false',
+    },
     secureCookies: (process.env.API_PUBLIC_URL ?? '').startsWith('https://'),
   };
 }

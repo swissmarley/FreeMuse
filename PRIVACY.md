@@ -17,8 +17,8 @@ Everything is stored in your own Postgres and Redis (Docker volumes on your mach
 - chat messages and the model's encrypted reasoning items (needed to continue conversations)
 - tasks, approvals, and the append-only audit trail of actions
 - memories the agent learned (only from your own messages; sensitive categories are skipped unless you ask)
-- connections and their scopes; OAuth tokens and saved logins are stored **encrypted** in the vault (envelope encryption).
-  The agent and the model never see the plaintext.
+- connections and their scopes; OAuth tokens, saved logins and your own Google OAuth client (if you set one up in the app)
+  are stored **encrypted** in the vault (envelope encryption). The agent and the model never see the plaintext.
 - push subscriptions, notifications, uploaded files, demo mailbox and calendar data, test-mode purchase records
 - Sentinel decisions and the hosts your sandbox browser visited
 
@@ -30,6 +30,9 @@ Everything is stored in your own Postgres and Redis (Docker volumes on your mach
   and regional availability.
 - **Services you connect** (e.g. Google) receive only the requests needed for actions you allow, limited to the scopes you choose.
 - **Push services** (Web Push endpoints, Expo/FCM/APNs) receive notification titles and short texts.
+- **Spoken replies** are synthesised on your own server by default (`TTS_PROVIDER=local`); the text is not sent anywhere.
+  The voice model itself is downloaded once from Hugging Face. If the operator sets `TTS_PROVIDER=openai-compatible`, the
+  text of spoken replies goes to that endpoint. Device voices may use your OS vendor's speech service.
 - Nothing is sold or used for advertising. There is no analytics or telemetry.
 
 ## Your rights and controls
