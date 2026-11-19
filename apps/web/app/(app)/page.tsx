@@ -88,8 +88,8 @@ export default function ChatPage() {
     try { speech.stop(); await listener.start(); } catch { toast(t.micUnavailable); }
   };
   const holdEnd = async () => {
-    if (!listener.listening) return;
-    const said = await listener.stop().catch(() => '');
+    let said = '';
+    try { said = await listener.stop(); } catch { toast(t.callDidntCatch); return; }
     if (said) await submit(said);
   };
 
@@ -151,7 +151,9 @@ export default function ChatPage() {
           <textarea id="composer" className="input" rows={1} value={listener.listening ? listener.partial || t.listening : text} placeholder={fmt(t.composerPlaceholder, { name: me.avatar.name })}
             onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } }} readOnly={listener.listening} />
           <button type="button" className={`icon-btn ${listener.listening ? 'recording' : ''}`} aria-label={t.holdToTalk} aria-pressed={listener.listening}
-            onPointerDown={() => void holdStart()} onPointerUp={() => void holdEnd()} onPointerLeave={() => void holdEnd()}
+            onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); void holdStart(); }}
+            onPointerUp={() => void holdEnd()} onPointerCancel={() => void holdEnd()} onLostPointerCapture={() => void holdEnd()}
+            onContextMenu={(e) => e.preventDefault()} style={{ touchAction: 'none' }}
             onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !listener.listening) { e.preventDefault(); void holdStart(); } }}
             onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') void holdEnd(); }}>🎤</button>
           <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.send}</button>

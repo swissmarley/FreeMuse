@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
@@ -58,8 +58,12 @@ export default function Chat() {
     const { fileId } = await api.uploadFile(a.name, a.mimeType ?? 'text/plain', await new File(a.uri).base64());
     setFiles((f) => [...f, { fileId, name: a.name }]);
   };
-  const talkStart = async () => { speech.stop(); await listener.start().catch(() => {}); };
-  const talkEnd = async () => { if (listener.listening) { const said = await listener.stop().catch(() => ''); if (said) await submit(said); } };
+  const talkStart = async () => { speech.stop(); await listener.start().catch(() => Alert.alert(t.micUnavailable)); };
+  const talkEnd = async () => {
+    let said = '';
+    try { said = await listener.stop(); } catch { Alert.alert(t.callDidntCatch); return; }
+    if (said) await submit(said);
+  };
 
   const data = [...s.messages, ...(s.streaming?.text ? [{ id: 'stream', role: 'assistant', text: s.streaming.text } as never] : [])];
   return (

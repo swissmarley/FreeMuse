@@ -1,8 +1,9 @@
 'use client';
 /**
  * Voice providers (web):
- *  - STT: realtime streaming (AudioWorklet → API WS proxy → Meta muse-voice-transcribe-1.0); falls back to recording a
- *    clip and POSTing it for file transcription.
+ *  - STT: captures 24 kHz PCM (AudioWorklet) and transcribes the clip with a language hint; the realtime stream
+ *    (API WS proxy → Meta muse-voice-transcribe-1.0) only drives live captions. Without AudioWorklet, a compressed
+ *    clip is recorded and POSTed instead.
  *  - TTS: professional ElevenLabs voices (the user's own key, every language) or natural neural voices synthesised
  *    locally by the API (Kokoro, English), played through Web Audio with amplitude-driven lip-sync. Falls back to the
  *    most natural installed Web Speech voice for the user's language (never blindly the system default).
@@ -11,8 +12,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoicePref } from '@muse/core/avatar';
 import type { VoiceConfig } from '@muse/core/client';
 import { speechLocale } from '@muse/core/i18n';
-import { chooseTtsEngine, type DeviceVoiceLike, naturalPlayback, pickDeviceVoice, splitForSpeech, type TtsEngine } from '@muse/core/voice';
+import { chooseTtsEngine, type DeviceVoiceLike, naturalPlayback, pickDeviceVoice, rmsToLevel, splitForSpeech, type TtsEngine } from '@muse/core/voice';
 import { api, API_URL } from './api';
+import { pcmToWav, toBase64 } from './call';
+
+const FRAME_MS = 80; // the PCM worklet posts 80 ms frames
 
 export interface TTSProvider { readonly kind: TtsEngine; speak(text: string, onLevel: (v: number) => void): Promise<void>; stop(): void }
 
@@ -214,90 +218,174 @@ export function useSpeech(pref: VoicePref, lang: string) {
   return { speak, stop, speaking, mouth, engine: provider.current?.kind ?? engineFor(pref, lang, cfg) };
 }
 
-/** Hold-to-talk / voice-mode recorder with live transcripts. */
+/** Clips shorter than this are a tap, not speech: don't send them for transcription. */
+const MIN_CLIP_MS = 250;
+
+interface ListenSession {
+  /** Stops capturing and resolves with the transcript ('' when nothing was said). */
+  finish(): Promise<string>;
+  /** Tears everything down without transcribing. */
+  abort(): void;
+}
+
+/** 24 kHz PCM capture via the AudioWorklet; the realtime transcriber only drives live captions. */
+async function pcmSession(stream: MediaStream, lang: string, onPartial: (t: string) => void, onLevel: (v: number) => void): Promise<ListenSession> {
+  const ctx = new AudioContext();
+  try {
+    await ctx.audioWorklet.addModule('/pcm-worklet.js');
+  } catch (e) {
+    void ctx.close().catch(() => {});
+    throw e;
+  }
+  if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+  const src = ctx.createMediaStreamSource(stream);
+  const node = new AudioWorkletNode(ctx, 'pcm-worklet');
+  // Every frame is kept from the very first one, so nothing said while the socket connects is lost.
+  const frames: ArrayBuffer[] = [];
+  const live = { final: '', current: '' };
+  const liveText = () => [live.final, live.current].filter(Boolean).join(' ').trim();
+  let ws: WebSocket | null = null;
+  try {
+    ws = new WebSocket(API_URL.replace(/^http/, 'ws') + '/v1/voice/stream');
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => { for (const f of frames) ws?.send(f); };
+    ws.onmessage = (m) => {
+      let e: { type?: string; text?: string; final?: boolean };
+      try { e = JSON.parse(String(m.data)); } catch { return; }
+      if (e.type !== 'transcript' || !e.text) return;
+      if (e.final) { live.final += (live.final ? ' ' : '') + e.text; live.current = ''; } else live.current = e.text;
+      onPartial(liveText());
+    };
+    ws.onerror = () => { /* captions are optional; the clip is still transcribed */ };
+  } catch { ws = null; }
+  node.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
+    frames.push(e.data.pcm);
+    onLevel(rmsToLevel(e.data.rms));
+    if (ws?.readyState === WebSocket.OPEN) ws.send(e.data.pcm);
+  };
+  src.connect(node);
+  const teardown = () => {
+    try { src.disconnect(); node.disconnect(); } catch { /* gone */ }
+    node.port.onmessage = null;
+    stream.getTracks().forEach((t) => t.stop());
+    void ctx.close().catch(() => {});
+  };
+  return {
+    abort() { teardown(); try { ws?.close(); } catch { /* gone */ } },
+    async finish() {
+      teardown();
+      // Let the realtime transcriber flush its last words.
+      if (ws?.readyState === WebSocket.OPEN) {
+        const sock = ws;
+        sock.send(JSON.stringify({ type: 'endStream' }));
+        await new Promise((r) => { sock.onclose = r; setTimeout(r, 1200); });
+      }
+      try { ws?.close(); } catch { /* gone */ }
+      if (frames.length * FRAME_MS < MIN_CLIP_MS) return liveText();
+      // The file transcriber takes a language hint, so it is the most accurate for every language.
+      try {
+        const { text } = await api.transcribe(toBase64(pcmToWav(frames)), 'audio/wav', lang);
+        return text.trim() || liveText();
+      } catch (e) {
+        const fallback = liveText();
+        if (fallback) return fallback;
+        throw e;
+      }
+    },
+  };
+}
+
+/** Fallback for browsers without AudioWorklet: record a compressed clip and let the server convert it. */
+function recorderSession(stream: MediaStream, lang: string, onLevel: (v: number) => void): ListenSession {
+  const rec = new MediaRecorder(stream);
+  const chunks: Blob[] = [];
+  const startedAt = performance.now();
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  rec.start();
+  let meterRaf = 0;
+  let meterSrc: MediaStreamAudioSourceNode | null = null;
+  try {
+    const ctx = audioContext();
+    meterSrc = ctx.createMediaStreamSource(stream);
+    const an = ctx.createAnalyser();
+    an.fftSize = 512;
+    meterSrc.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const meter = () => {
+      an.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const d of buf) peak = Math.max(peak, Math.abs(d - 128) / 128);
+      onLevel(Math.min(1, peak * 2));
+      meterRaf = requestAnimationFrame(meter);
+    };
+    meter();
+  } catch { /* metering is optional */ }
+  const teardown = () => {
+    cancelAnimationFrame(meterRaf);
+    try { meterSrc?.disconnect(); } catch { /* gone */ }
+    stream.getTracks().forEach((t) => t.stop());
+  };
+  return {
+    abort() { try { rec.stop(); } catch { /* not recording */ } teardown(); },
+    async finish() {
+      await new Promise<void>((r) => { if (rec.state === 'inactive') return r(); rec.onstop = () => r(); rec.stop(); });
+      teardown();
+      if (performance.now() - startedAt < MIN_CLIP_MS || !chunks.length) return '';
+      const mime = rec.mimeType || chunks[0]!.type || 'audio/webm';
+      const buf = new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer());
+      const { text } = await api.transcribe(toBase64(buf), mime, lang);
+      return text.trim();
+    },
+  };
+}
+
+/** Hold-to-talk recorder with live transcripts. */
 export function useListener(lang: string) {
   const [listening, setListening] = useState(false);
   const [partial, setPartial] = useState('');
   const [level, setLevel] = useState(0);
-  const stopRef = useRef<(() => Promise<string>) | null>(null);
+  // The session being opened (getUserMedia can wait on a permission prompt), so a quick release still stops it.
+  const opening = useRef<Promise<ListenSession | null> | null>(null);
+  const langRef = useRef(lang);
+  langRef.current = lang;
 
   const start = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    setListening(true);
+    if (opening.current) return;
     setPartial('');
-    // Try realtime streaming first.
+    setListening(true);
+    const p = (async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      try {
+        return await pcmSession(stream, langRef.current, setPartial, setLevel);
+      } catch {
+        return recorderSession(stream, langRef.current, setLevel);
+      }
+    })();
+    opening.current = p;
     try {
-      const ctx = new AudioContext();
-      await ctx.audioWorklet.addModule('/pcm-worklet.js');
-      const src = ctx.createMediaStreamSource(stream);
-      const node = new AudioWorkletNode(ctx, 'pcm-worklet');
-      const ws = new WebSocket(API_URL.replace(/^http/, 'ws') + '/v1/voice/stream');
-      ws.binaryType = 'arraybuffer';
-      let finalText = '';
-      let current = '';
-      ws.onmessage = (m) => {
-        const e = JSON.parse(String(m.data));
-        if (e.type !== 'transcript') return;
-        if (e.final) { finalText += (finalText ? ' ' : '') + e.text; current = ''; } else current = e.text;
-        setPartial([finalText, current].filter(Boolean).join(' '));
-      };
-      const opened = await new Promise<boolean>((res) => { ws.onopen = () => res(true); ws.onerror = () => res(false); setTimeout(() => res(false), 4000); });
-      if (!opened) throw new Error('ws failed');
-      node.port.onmessage = (e) => { setLevel(e.data.level); if (ws.readyState === 1) ws.send(e.data.pcm); };
-      src.connect(node);
-      stopRef.current = async () => {
-        src.disconnect();
-        node.disconnect();
-        stream.getTracks().forEach((t) => t.stop());
-        if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'endStream' }));
-        await new Promise((r) => { ws.onclose = r; setTimeout(r, 2500); });
-        void ctx.close();
-        return [finalText, current].filter(Boolean).join(' ').trim();
-      };
-      return;
-    } catch { /* fall back to clip upload */ }
-    const rec = new MediaRecorder(stream);
-    const chunks: Blob[] = [];
-    rec.ondataavailable = (e) => chunks.push(e.data);
-    rec.start();
-    // Meter the mic so the avatar can react to your voice.
-    let meterRaf = 0;
-    let meterSrc: MediaStreamAudioSourceNode | null = null;
-    try {
-      const ctx = audioContext();
-      meterSrc = ctx.createMediaStreamSource(stream);
-      const an = ctx.createAnalyser();
-      an.fftSize = 512;
-      meterSrc.connect(an);
-      const buf = new Uint8Array(an.fftSize);
-      const meter = () => {
-        an.getByteTimeDomainData(buf);
-        let peak = 0;
-        for (const d of buf) peak = Math.max(peak, Math.abs(d - 128) / 128);
-        setLevel(Math.min(1, peak * 2));
-        meterRaf = requestAnimationFrame(meter);
-      };
-      meter();
-    } catch { /* metering is optional */ }
-    stopRef.current = async () => {
-      cancelAnimationFrame(meterRaf);
-      meterSrc?.disconnect();
-      await new Promise<void>((r) => { rec.onstop = () => r(); rec.stop(); });
-      stream.getTracks().forEach((t) => t.stop());
-      const buf = new Uint8Array(await new Blob(chunks, { type: rec.mimeType }).arrayBuffer());
-      let bin = '';
-      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-      const { text } = await api.req<{ text: string }>('POST', '/v1/voice/transcribe', { audio: btoa(bin), mime: rec.mimeType, language: lang });
-      return text;
-    };
-  }, [lang]);
+      await p;
+    } catch (e) {
+      if (opening.current === p) opening.current = null;
+      setListening(false);
+      throw e;
+    }
+  }, []);
 
-  const stop = useCallback(async () => {
-    const fn = stopRef.current;
-    stopRef.current = null;
+  const stop = useCallback(async (): Promise<string> => {
+    const p = opening.current;
+    opening.current = null;
     setListening(false);
     setLevel(0);
-    return fn ? fn() : '';
+    if (!p) return '';
+    const session = await p.catch(() => null);
+    return session ? session.finish() : '';
+  }, []);
+
+  // Never leave the microphone open when the page goes away.
+  useEffect(() => () => {
+    const p = opening.current;
+    opening.current = null;
+    void p?.then((s) => s?.abort()).catch(() => {});
   }, []);
 
   return { start, stop, listening, partial, level };
