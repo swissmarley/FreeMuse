@@ -177,24 +177,49 @@ export function useListener(lang: string) {
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const rs = useAudioRecorderState(recorder, 80);
   const [listening, setListening] = useState(false);
+  // The recording being started (the permission prompt can take a while), so an early release still stops it.
+  const opening = useRef<Promise<boolean> | null>(null);
+  const startedAt = useRef(0);
   // metering is in dBFS (-160..0); map roughly -50..-5 dB to 0..1
   const level = listening && typeof rs.metering === 'number' ? Math.max(0, Math.min(1, (rs.metering + 50) / 45)) : 0;
   const start = useCallback(async () => {
-    const perm = await AudioModule.requestRecordingPermissionsAsync();
-    if (!perm.granted) throw new Error('Microphone permission denied');
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
+    if (opening.current) return;
     setListening(true);
+    const p = (async () => {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) throw new Error('Microphone permission denied');
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      startedAt.current = Date.now();
+      return true;
+    })();
+    opening.current = p;
+    try {
+      await p;
+    } catch (e) {
+      if (opening.current === p) opening.current = null;
+      setListening(false);
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+      throw e;
+    }
   }, [recorder]);
   const stop = useCallback(async (): Promise<string> => {
+    const p = opening.current;
+    opening.current = null;
     setListening(false);
-    await recorder.stop();
-    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
-    if (!recorder.uri) return '';
+    if (!p) return '';
+    if (!(await p.catch(() => false))) return '';
+    try {
+      await recorder.stop();
+    } finally {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    }
+    // A tap, not speech.
+    if (Date.now() - startedAt.current < 250 || !recorder.uri) return '';
     const b64 = await new File(recorder.uri).base64();
     const { text } = await api.transcribe(b64, 'audio/m4a', lang);
-    return text;
+    return text.trim();
   }, [recorder, lang]);
   return { start, stop, listening, level, lang };
 }

@@ -39,7 +39,7 @@ export function pcmToWav(frames: ArrayBuffer[], sampleRate = 24000): Uint8Array 
   return out;
 }
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
   let bin = '';
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);

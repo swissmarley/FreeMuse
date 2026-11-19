@@ -118,11 +118,19 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
     if (!d.cfg.modelApiKey || d.cfg.sttProvider === 'none') return reply.code(501).send({ code: 'stt_disabled', message: 'Speech-to-text is not configured' });
     const { audio, language } = (req.body ?? {}) as { audio?: string; mime?: string; language?: string };
     if (!audio) return reply.code(400).send({ code: 'invalid', message: 'audio (base64) required' });
-    let buf: Buffer = Buffer.from(audio, "base64");
-    if (!isSupportedWav(buf)) buf = await toWav24k(buf);
+    let buf: Buffer = Buffer.from(audio, 'base64');
+    try {
+      if (!isSupportedWav(buf)) buf = await toWav24k(buf);
+    } catch (e) {
+      return reply.code(415).send({ code: 'audio_unsupported', message: (e as Error).message });
+    }
     const lang = language && LANG_NAMES[language] ? language : await userLang(req.user!.id);
-    const text = await transcribeWav(d.cfg.llmBaseUrl, d.cfg.modelApiKey, buf, LANG_NAMES[lang]);
-    return { text };
+    try {
+      return { text: await transcribeWav(d.cfg.llmBaseUrl, d.cfg.modelApiKey, buf, LANG_NAMES[lang]) };
+    } catch (e) {
+      req.log.warn({ err: (e as Error).message }, 'transcription failed');
+      return reply.code(502).send({ code: 'stt_failed', message: 'Could not transcribe the recording' });
+    }
   });
 
   /** Realtime STT: client streams 24 kHz PCM16 mono frames; we relay to Meta and stream transcripts back. */
@@ -138,13 +146,14 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
     });
     up.on('message', (data, isBinary) => {
       if (isBinary) return;
-      const msg = JSON.parse(String(data));
+      let msg: { sessionId?: string; type?: string; transcript?: string; message?: string; final?: boolean };
+      try { msg = JSON.parse(String(data)); } catch { return; }
       if (!ready && msg.sessionId) {
         ready = true;
         for (const b of pending.splice(0)) up.send(b);
         return;
       }
-      if (msg.type === 'transcript' || msg.type === 'error') socket.send(JSON.stringify({ type: msg.type, text: msg.transcript ?? msg.message, final: !!msg.final }));
+      if ((msg.type === 'transcript' || msg.type === 'error') && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: msg.type, text: msg.transcript ?? msg.message, final: !!msg.final }));
     });
     up.on('close', () => socket.close(1000));
     up.on('error', () => socket.close(1011, 'upstream error'));
@@ -156,7 +165,7 @@ export function voiceRoutes(app: FastifyInstance, d: Deps) {
       if (ready) up.send(data);
       else if (pending.length < 200) pending.push(data);
     });
-    socket.on('close', () => up.close());
+    socket.on('close', () => { try { up.close(); } catch { /* not connected yet */ } });
   });
 
   app.post('/v1/voice/tts', { ...auth, config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req, reply) => {
