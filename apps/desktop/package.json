@@ -53,8 +53,10 @@
         }
       ],
       "icon": "build/icon.png",
-      "identity": null,
+      "identity": "-",
       "hardenedRuntime": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Talk to your agent with your voice."
       }
