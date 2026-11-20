@@ -3,7 +3,7 @@
     "name": "Free Muse",
     "slug": "free-muse",
     "scheme": "freemuse",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
