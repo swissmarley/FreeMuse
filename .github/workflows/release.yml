@@ -110,7 +110,22 @@ jobs:
           CI: '1'
       - name: Build release APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+        # Maven Central occasionally answers "not found" for Kotlin artifacts that are published.
+        # The same project built on the previous release, so retry the resolution before giving up.
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            extra=()
+            if [ "$attempt" -gt 1 ]; then
+              echo "Gradle dependency resolution failed; retry ${attempt} of 3"
+              extra=(--refresh-dependencies)
+              sleep 20
+            fi
+            if ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" "${extra[@]}"; then
+              exit 0
+            fi
+          done
+          exit 1
         env:
           NODE_ENV: production
       - name: Collect
