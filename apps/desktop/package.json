@@ -1,7 +1,7 @@
 {
   "name": "freemuse-desktop",
   "productName": "Free Muse",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Free Muse desktop app: a native window for your self-hosted personal AI agent.",
   "author": "Free Muse",
   "homepage": "https://github.com/swissmarley/FreeMuse",
