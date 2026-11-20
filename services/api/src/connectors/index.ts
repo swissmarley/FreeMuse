@@ -13,7 +13,7 @@ export function buildRegistry(cfg: ApiConfig): Map<string, ConnectorImpl> {
 }
 
 /** Connectors shown on the Connections screen (internal ones like browser/payments are always on). */
-export const USER_CONNECTORS = ['gmail', 'gcal', 'gdrive', 'demo_mail', 'demo_calendar'];
+export const USER_CONNECTORS = ['gmail', 'gcal', 'gdrive'];
 
 /** Permissions pre-selected for one-tap connect. Sending/creating still always needs your approval per action. */
 export const RECOMMENDED_SCOPES: Record<string, string[]> = {

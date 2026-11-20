@@ -74,7 +74,7 @@ export default function AvatarPage() {
   const selectedEl = v.elevenVoice || DEFAULT_ELEVEN_VOICE;
   const elList: ElevenVoice[] = elVoices.length ? elVoices : ELEVEN_DEFAULT_VOICES.map((d) => ({ id: d.id, name: d.name, category: 'premade', description: '', gender: d.gender }));
   return (
-    <main className="page">
+    <main className="page has-save-bar">
       <h1>{fmt(t.customiseName, { name: a.name })}</h1>
       <p className="lead">{fmt(t.customiseLead, { name: a.name })}</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr)', gap: 20 }}>
@@ -185,8 +185,10 @@ export default function AvatarPage() {
           <button type="button" className="btn secondary" disabled={!!trying} onClick={() => void tryVoice(v, 'current')}>{trying === 'current' ? t.speaking : t.tryVoice}</button>
         </section>
       </div>
-      <div className="row" style={{ position: 'sticky', bottom: 80, marginTop: 20 }}>
-        <button className="btn" disabled={saving || !a.name.trim()} onClick={() => void save()}>{t.save}</button>
+      <div className="save-bar">
+        <div className="save-bar-inner">
+          <button className="btn" type="button" disabled={saving || !a.name.trim()} onClick={() => void save()}>{t.save}</button>
+        </div>
       </div>
     </main>
   );

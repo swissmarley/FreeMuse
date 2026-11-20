@@ -56,20 +56,24 @@ test('adult signs up, names the avatar and lands in chat', async () => {
   await expect(page.getByRole('heading', { name: 'Pip' })).toBeVisible();
 });
 
-test('connect Demo Mail with granular scopes', async () => {
+test('demo connections are not offered; the suite still attaches the local mailbox', async () => {
   await page.goto('/connections');
-  const card = page.locator('article.conn-card', { hasText: 'Demo Mail' });
-  await card.locator('summary').click();
-  await card.getByLabel('Write drafts').check();
-  await card.getByLabel('Send email').check();
-  await card.getByRole('button', { name: 'Connect', exact: true }).click();
-  await expect(card.getByText(/Connected/)).toBeVisible();
+  await expect(page.getByText('Demo Mail')).toHaveCount(0);
+  await expect(page.getByText('Demo Calendar')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Connect demo in one tap' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Try with demo data' })).toHaveCount(0);
+  const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4400';
+  const headers = { 'x-muse-client': 'web' };
+  const mail = await page.request.post(`${api}/v1/connectors/demo_mail/connect`, { data: { scopes: ['read', 'compose', 'send'] }, headers });
+  expect(mail.ok(), await mail.text()).toBeTruthy();
+  const cal = await page.request.post(`${api}/v1/connectors/demo_calendar/connect`, { data: { scopes: ['read', 'write'] }, headers });
+  expect(cal.ok(), await cal.text()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByText('Demo Mail')).toHaveCount(0);
 });
 
-test('one-tap demo connect, and Google offers a guided setup instead of env vars', async () => {
+test('Google offers a guided setup instead of env vars', async () => {
   await page.goto('/connections');
-  await page.getByRole('button', { name: 'Connect demo in one tap' }).click();
-  await expect(page.locator('article.conn-card', { hasText: 'Demo Calendar' }).getByText(/Connected/)).toBeVisible();
   await page.locator('.quick-tile', { hasText: 'Google' }).getByRole('button', { name: 'Set up Google' }).click();
   await expect(page.getByRole('heading', { name: /Set up Google/ })).toBeVisible();
   await expect(page.getByText('/v1/oauth/google/callback')).toBeVisible();

@@ -1,15 +1,14 @@
 import { performAction } from '../gateway.js';
-import { fn, pickConnector, S, SA, type Tool } from './types.js';
+import { fn, pickConnector, S, SA, withDemo, type Tool } from './types.js';
 
-const CAL = ['gcal', 'demo_calendar'];
-const none = 'No calendar is connected. Ask the user to connect Google Calendar or Demo Calendar in Connections.';
+const none = 'No calendar is connected. Ask the user to connect Google Calendar in Connections.';
 
 export const calendarTools: Tool[] = [
   {
     def: fn('calendar_list', 'List calendar events in a time range (ISO 8601).', { from: S('Start, ISO date-time'), to: S('End, ISO date-time') }, ['from', 'to']),
     label: () => 'Checking your calendar',
     async run(ctx, a, callId) {
-      const c = await pickConnector(ctx, CAL);
+      const c = await pickConnector(ctx, withDemo('gcal', 'demo_calendar'));
       if (!c) return none;
       return performAction(ctx, { actionClass: 'read', connector: c, operation: 'list_events', payload: { from: String(a.from), to: String(a.to) }, title: 'List events', callId, sourceLabel: () => `calendar:${c}` });
     },
@@ -18,7 +17,7 @@ export const calendarTools: Tool[] = [
     def: fn('calendar_create', 'Create a calendar event (needs the user\'s approval; invites are sent to attendees).', { title: S('Event title'), start: S('ISO date-time'), end: S('ISO date-time'), location: S('Location'), notes: S('Notes'), attendees: SA('Attendee emails') }, ['title', 'start', 'end']),
     label: (a) => `Adding “${a.title}” to your calendar`,
     async run(ctx, a, callId) {
-      const c = await pickConnector(ctx, CAL);
+      const c = await pickConnector(ctx, withDemo('gcal', 'demo_calendar'));
       if (!c) return none;
       const payload = { title: String(a.title), start: String(a.start), end: String(a.end), location: String(a.location ?? ''), notes: String(a.notes ?? ''), attendees: a.attendees ?? [] };
       return performAction(ctx, { actionClass: 'write', connector: c, operation: 'create_event', payload, title: `Add event “${payload.title}” (${payload.start})`, callId });

@@ -33,10 +33,11 @@ export async function loadUser(d: AgentDeps, userId: string): Promise<UserCtx | 
   const u = await d.db.one('SELECT avatar, settings FROM users WHERE id=$1', [userId]);
   if (!u) return null;
   const conns = await d.db.q("SELECT connector, scopes FROM connections WHERE user_id=$1 AND status='active'", [userId]);
+  const visible = process.env.ALLOW_DEMO_CONNECTORS === '1' ? conns : conns.filter((c) => c.connector !== 'demo_mail' && c.connector !== 'demo_calendar');
   return {
     avatar: { ...DEFAULT_AVATAR, ...u.avatar, personality: { ...DEFAULT_AVATAR.personality, ...u.avatar?.personality }, outfit: { ...DEFAULT_AVATAR.outfit, ...u.avatar?.outfit }, voice: { ...DEFAULT_AVATAR.voice, ...u.avatar?.voice } },
     settings: { ...DEFAULT_SETTINGS, ...u.settings },
-    connections: conns,
+    connections: visible,
   };
 }
 

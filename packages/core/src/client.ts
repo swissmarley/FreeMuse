@@ -130,8 +130,8 @@ export class MuseClient {
   }
   updateScopes(id: string, scopes: string[]) { return this.req<{ connection: Connection; authorizeUrl?: string }>('PATCH', `/v1/connections/${id}`, { scopes }); }
   disconnect(id: string) { return this.req<{ ok: true }>('DELETE', `/v1/connections/${id}`); }
-  /** One-tap connect with recommended permissions: 'demo' connects instantly, 'google' returns one consent URL. */
-  quickConnect(preset: 'demo' | 'google', connectors?: string[]) {
+  /** One-tap connect with recommended permissions. Returns one Google consent URL. */
+  quickConnect(preset: 'google', connectors?: string[]) {
     return this.req<{ authorizeUrl?: string; connections?: Connection[] }>('POST', '/v1/connect/quick', { preset, connectors });
   }
   googleSetup() {

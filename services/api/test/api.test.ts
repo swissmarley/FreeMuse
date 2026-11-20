@@ -164,7 +164,14 @@ describe.skipIf(!url)('api', () => {
     expect(hist.json().messages.at(-1).text).toBe('Hello!');
   });
 
-  it('connects demo mail with granular scopes', async () => {
+  it('connects the local test mailbox with granular scopes, and does not offer it as a product connection', async () => {
+    process.env.ALLOW_DEMO_CONNECTORS = '1';
+    const hidden = await app.inject({ method: 'GET', url: '/v1/connectors', headers: H() });
+    const ids = hidden.json().connectors.map((c: { id: string }) => c.id);
+    expect(ids).not.toContain('demo_mail');
+    expect(ids).not.toContain('demo_calendar');
+    const refused = await app.inject({ method: 'POST', url: '/v1/connect/quick', headers: H(), payload: { preset: 'demo' } });
+    expect(refused.statusCode).toBe(400);
     const r = await app.inject({ method: 'POST', url: '/v1/connectors/demo_mail/connect', headers: H(), payload: { scopes: ['read', 'compose', 'bogus'] } });
     expect(r.json().connection.scopes).toEqual(['read', 'compose']);
   });
@@ -250,14 +257,6 @@ describe.skipIf(!url)('api', () => {
     const r = await app.inject({ method: 'PUT', url: '/v1/me/avatar', headers: H(), payload: { ...me.json().avatar, voice: { provider: 'server', voiceId: '', naturalVoice: 'af_bella', rate: 1, pitch: 1.15 } } });
     expect(r.statusCode).toBe(200);
     expect(r.json().avatar.voice.naturalVoice).toBe('af_bella');
-  });
-
-  it('one-tap demo connect uses recommended permissions', async () => {
-    const r = await app.inject({ method: 'POST', url: '/v1/connect/quick', headers: H(), payload: { preset: 'demo' } });
-    expect(r.statusCode).toBe(200);
-    const byId = Object.fromEntries(r.json().connections.map((c: { connector: string; scopes: string[] }) => [c.connector, c.scopes]));
-    expect(byId.demo_mail).toEqual(['read', 'compose', 'send']);
-    expect(byId.demo_calendar).toEqual(['read', 'write']);
   });
 
   it('Google: in-app setup, one consent for all services, shared token revoked only with the last connection', async () => {

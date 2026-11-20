@@ -1,31 +1,24 @@
-## Free Muse v0.1.4
+## Free Muse v0.1.5
 
-A fix for voice input in the macOS desktop app.
+The avatar Save button stays put while you scroll, and the practice mailbox is gone.
 
 ### Fixed
 
-- **macOS: the microphone permission is now kept.** The Mac app wasn't code-signed, so macOS never stored your "Allow": it kept asking and voice input stayed blocked. The app is now ad-hoc signed with the microphone entitlement.
-- **macOS: clearer help when the microphone is off.** If microphone access is turned off for Free Muse, the app offers to open System Settings → Privacy & Security → Microphone instead of failing silently.
+- **The Save button stays at the bottom of the page.** On the avatar page it used to travel with the form and sit across the card border. It now stays fixed at the bottom of the column, including above the mobile tab bar.
 
-### Upgrading on macOS
+### Removed
 
-Clear the old permission entry once, then allow the microphone when asked:
-
-```bash
-tccutil reset Microphone local.personal.freemuse
-```
-
-The app is ad-hoc signed (not with an Apple Developer ID), so macOS asks again once after each update.
+- **Demo Mail and Demo Calendar.** Onboarding and Connections no longer offer “Try with demo data”. Connect Gmail, Calendar and Drive instead. The agent uses those accounts only.
 
 ### Downloads
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Intel + Apple Silicon) | `FreeMuse-0.1.4-mac-universal.dmg` | Not notarised: the first time, right-click the app → **Open**, or run `xattr -cr "/Applications/Free Muse.app"`. |
-| Windows 10/11 | `FreeMuse-0.1.4-win-x64.exe` (installer), `-arm64.exe`, `FreeMuse-0.1.4-win-portable.exe` | Not code-signed: SmartScreen may warn, choose **More info → Run anyway**. |
+| macOS (Intel + Apple Silicon) | `FreeMuse-0.1.5-mac-universal.dmg` | Not notarised: the first time, right-click the app → **Open**, or run `xattr -cr "/Applications/Free Muse.app"`. |
+| Windows 10/11 | `FreeMuse-0.1.5-win-x64.exe` (installer), `-arm64.exe`, `FreeMuse-0.1.5-win-portable.exe` | Not code-signed: SmartScreen may warn, choose **More info → Run anyway**. |
 | Linux | `.AppImage` (x64, arm64), `.deb` (x64, arm64), `.tar.gz` | AppImage: `chmod +x` and run. |
-| Android 8+ | `FreeMuse-0.1.4-android.apk` | Allow "install unknown apps" for your browser or file manager. |
-| iOS / iPadOS | `FreeMuse-0.1.4-ios-unsigned.ipa` | Unsigned: install with AltStore or Sideloadly (they sign it with your Apple ID), or re-sign it with your developer account. |
+| Android 8+ | `FreeMuse-0.1.5-android.apk` | Allow "install unknown apps" for your browser or file manager. |
+| iOS / iPadOS | `FreeMuse-0.1.5-ios-unsigned.ipa` | Unsigned: install with AltStore or Sideloadly (they sign it with your Apple ID), or re-sign it with your developer account. |
 
 `SHA256SUMS.txt` lists checksums for every file.
 

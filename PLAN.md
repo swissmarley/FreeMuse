@@ -82,7 +82,7 @@ i. customization polish + mobile.
 ## 3. Risks
 - Model API region policy may block EU use. Mitigation: the provider is switchable by env only.
 - Real Google OAuth needs your own Google Cloud OAuth client (consent screen, test users). Mitigation: a full
-  implementation, plus a clearly labelled local **Demo Mail/Calendar** connector so every flow is testable offline.
+  implementation. The automated suite uses a local mailbox fixture; the app only offers Google connections.
 - Push to iOS/Android needs Expo/FCM/APNs credentials. Mitigation: Web Push (VAPID, self-hosted) plus an in-app
   notification center. Expo push is wired in and only needs the project credentials.
 - Mobile can't be run in this build container (no simulator). Mitigation: type-checked, unit-tested and

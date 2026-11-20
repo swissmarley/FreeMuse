@@ -16,13 +16,11 @@ appId: local.personal.freemuse
 - assertVisible: "You are chatting with an AI agent.*"
 - tapOn: "More"
 - tapOn: "Connections & permissions"
-- tapOn: { text: "Connect", index: 3 }
+- assertNotVisible: "Try with demo data"
+- assertNotVisible: "Demo Mail"
 - back
 - tapOn: "Chat"
 - tapOn: "Message Jolly…"
-- inputText: "Plan my trip to Lisbon and draft the email to my host about my arrival."
+- inputText: "Hello"
 - tapOn: "Send"
-- extendedWaitUntil: { visible: ".*Approvals.*", timeout: 120000 }
-- tapOn: "Approvals"
-- tapOn: "Approve"
-- assertNotVisible: "Approve"
+- extendedWaitUntil: { visible: ".*here to help.*", timeout: 120000 }

@@ -99,6 +99,7 @@ describe.skipIf(!url)('full stack (scripted model)', () => {
     const s = await api.inject({ method: 'POST', url: '/v1/auth/signup', payload: { email: `fs${Date.now()}@x.io`, password: 'correct horse battery', birthDate: '1988-03-03', acceptTerms: true } });
     token = s.json().token;
     userId = s.json().me.id;
+    process.env.ALLOW_DEMO_CONNECTORS = '1';
     await api.inject({ method: 'POST', url: '/v1/connectors/demo_mail/connect', headers: H(), payload: { scopes: ['read', 'compose', 'send'] } });
   }, 60_000);
 
