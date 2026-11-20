@@ -172,9 +172,8 @@ injection, so the tests prove that the Sentinel and approval layers stop attacks
 
 ## Demo script (five scenarios)
 
-Sign up (you must be 18+). The last onboarding step offers **Try with demo data**, which connects **Demo Mail** and **Demo
-Calendar** in one tap (or use **Connections → Try with demo data** later). These are local practice accounts with sample emails, so nothing leaves your server. Turn on notifications in
-**Settings**.
+Sign up (you must be 18+). The app connects Gmail, Calendar and Drive from **Connections**. The walkthrough below is what the
+automated suite runs against a local mailbox fixture (that fixture is not offered in the app). Turn on notifications in **Settings**.
 
 1. **"Plan my trip to Lisbon and draft the email to my host (needs approval)."**
    The agent sends the email and calendar subagents off in parallel, finds Lucia's email, and prepares the reply. A push

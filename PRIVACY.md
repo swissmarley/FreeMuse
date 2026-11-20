@@ -19,7 +19,7 @@ Everything is stored in your own Postgres and Redis (Docker volumes on your mach
 - memories the agent learned (only from your own messages; sensitive categories are skipped unless you ask)
 - connections and their scopes; OAuth tokens, saved logins and your own Google OAuth client (if you set one up in the app)
   are stored **encrypted** in the vault (envelope encryption). The agent and the model never see the plaintext.
-- push subscriptions, notifications, uploaded files, demo mailbox and calendar data, test-mode purchase records
+- push subscriptions, notifications, uploaded files, test-mode purchase records
 - Sentinel decisions and the hosts your sandbox browser visited
 
 ## Who receives data

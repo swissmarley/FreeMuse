@@ -59,20 +59,11 @@ export function connectionRoutes(app: FastifyInstance, d: Deps) {
 
   /**
    * One-tap connect with recommended permissions:
-   *  - preset "demo": Demo Mail + Demo Calendar, instantly.
    *  - preset "google": Gmail, Calendar and Drive (or a subset) behind ONE Google consent screen.
    */
   app.post('/v1/connect/quick', auth, async (req, reply) => {
     const userId = req.user!.id;
     const body = (req.body ?? {}) as { preset?: string; connectors?: string[] };
-    if (body.preset === 'demo') {
-      const connections = [];
-      for (const id of DEMO_CONNECTORS) {
-        const r = await d.registry.get(id)!.connect(ctx(userId), RECOMMENDED_SCOPES[id]!, '', '');
-        if ('account' in r) connections.push(await saveConnection(d, userId, id, RECOMMENDED_SCOPES[id]!, r.account, null));
-      }
-      return { connections };
-    }
     if (body.preset === 'google') {
       const wanted = GOOGLE_CONNECTORS.filter((c) => !body.connectors?.length || body.connectors.includes(c));
       if (!wanted.length) return reply.code(400).send({ code: 'invalid', message: 'Pick at least one Google service' });
@@ -91,12 +82,20 @@ export function connectionRoutes(app: FastifyInstance, d: Deps) {
     return reply.code(400).send({ code: 'invalid', message: 'Unknown preset' });
   });
 
-  app.get('/v1/connections', auth, async (req) => ({ connections: await listConnections(d.db, req.user!.id) }));
+  app.get('/v1/connections', auth, async (req) => {
+    const connections = await listConnections(d.db, req.user!.id);
+    if (process.env.ALLOW_DEMO_CONNECTORS === '1') return { connections };
+    const hidden = new Set<string>(DEMO_CONNECTORS);
+    return { connections: connections.filter((c) => !hidden.has(c.connector)) };
+  });
 
   app.post('/v1/connectors/:id/connect', auth, async (req, reply) => {
     const { id } = req.params as { id: string };
     const userId = req.user!.id;
-    const impl = USER_CONNECTORS.includes(id) ? d.registry.get(id) : undefined;
+    // Demo mail/calendar are not product connections. The automated suite opts in with
+    // ALLOW_DEMO_CONNECTORS=1 so it can still exercise approvals against a local mailbox.
+    const demoForTests = process.env.ALLOW_DEMO_CONNECTORS === '1' && (DEMO_CONNECTORS as readonly string[]).includes(id);
+    const impl = (USER_CONNECTORS.includes(id) || demoForTests) ? d.registry.get(id) : undefined;
     if (!impl) return reply.code(404).send({ code: 'not_found', message: 'Unknown connector' });
     const allowed = (CONNECTOR_SCOPES[id] ?? []).map((s) => s.id);
     const scopes = [...new Set(((req.body as { scopes?: string[] })?.scopes ?? []).filter((s) => allowed.includes(s)))];

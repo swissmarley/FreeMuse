@@ -8,7 +8,7 @@ import { useMuse } from '../../../lib/store';
 
 type GoogleSetup = Awaited<ReturnType<typeof api.googleSetup>>;
 
-const ICONS: Record<string, string> = { gmail: '✉️', gcal: '📅', gdrive: '📁', demo_mail: '📨', demo_calendar: '🗓️' };
+const ICONS: Record<string, string> = { gmail: '✉️', gcal: '📅', gdrive: '📁' };
 const SHORT: Record<string, string> = { gmail: 'Gmail', gcal: 'Calendar', gdrive: 'Drive' };
 
 function useT(): Strings {
@@ -92,7 +92,7 @@ function GoogleSetupGuide({ setup, onSaved, onClose }: { setup: GoogleSetup; onS
   );
 }
 
-function QuickStart({ cons, conns, setup, openSetup, reload }: { cons: ConnectorInfo[]; conns: Connection[]; setup: GoogleSetup | null; openSetup: () => void; reload: () => void }) {
+function QuickStart({ cons, conns, setup, openSetup }: { cons: ConnectorInfo[]; conns: Connection[]; setup: GoogleSetup | null; openSetup: () => void }) {
   const { toast } = useMuse();
   const t = useT();
   const google = cons.filter((c) => c.group === 'google');
@@ -100,7 +100,6 @@ function QuickStart({ cons, conns, setup, openSetup, reload }: { cons: Connector
   const [busy, setBusy] = useState<string | null>(null);
   const has = (id: string) => conns.some((x) => x.connector === id);
   const googleAccount = conns.find((x) => google.some((g) => g.id === x.connector))?.account;
-  const demoDone = has('demo_mail') && has('demo_calendar');
   const googleAvailable = google.some((g) => g.available);
   const missingGoogle = google.filter((g) => !has(g.id));
 
@@ -110,10 +109,6 @@ function QuickStart({ cons, conns, setup, openSetup, reload }: { cons: Connector
       const r = await api.quickConnect('google', picked.filter((p) => missingGoogle.some((g) => g.id === p)));
       if (r.authorizeUrl) window.location.href = r.authorizeUrl;
     } catch (e) { toast((e as Error).message); setBusy(null); }
-  };
-  const connectDemo = async () => {
-    setBusy('demo');
-    try { await api.quickConnect('demo'); toast(t.demoConnected); reload(); } catch (e) { toast((e as Error).message); } finally { setBusy(null); }
   };
 
   return (
@@ -143,12 +138,6 @@ function QuickStart({ cons, conns, setup, openSetup, reload }: { cons: Connector
             <span className="hint">{t.setupOnce}</span>
           </>
         )}
-      </article>
-      <article className="card quick-tile">
-        <div className="quick-icon" aria-hidden>🧪</div>
-        <h2>{t.tryDemo}</h2>
-        <p className="muted">{t.demoBody}</p>
-        {demoDone ? <span className="chip ok">{t.connected}</span> : <button className="btn secondary" disabled={busy !== null} onClick={() => void connectDemo()}>{busy === 'demo' ? t.connecting : t.connectDemo}</button>}
       </article>
     </section>
   );
@@ -184,7 +173,7 @@ function ConnectorCard({ c, conn, reload, openSetup }: { c: ConnectorInfo; conn?
         <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
           <span className="conn-icon" aria-hidden>{ICONS[c.id] ?? '🔌'}</span>
           <div>
-            <h3 id={`c-${c.id}`} style={{ fontSize: '1.02rem', margin: 0 }}>{c.name} {c.kind === 'demo' && <span className="chip">{t.demoData}</span>}</h3>
+            <h3 id={`c-${c.id}`} style={{ fontSize: '1.02rem', margin: 0 }}>{c.name}</h3>
             <p className="muted" style={{ margin: '4px 0 0', fontSize: '.9rem' }}>{c.description}</p>
           </div>
         </div>
@@ -268,7 +257,7 @@ function Connections() {
     <main className="page">
       <h1>{t.connections}</h1>
       <p className="lead">{t.connectionsLead}</p>
-      <QuickStart cons={cons} conns={conns} setup={setup} openSetup={openSetup} reload={() => void load()} />
+      <QuickStart cons={cons} conns={conns} setup={setup} openSetup={openSetup} />
       {showSetup && setup && <GoogleSetupGuide setup={setup} onClose={() => setShowSetup(false)} onSaved={() => { setShowSetup(false); void load(); }} />}
       <h2 style={{ fontSize: '1.1rem', margin: '24px 0 10px' }}>{t.yourApps}</h2>
       <div className="stack">{cons.map((c) => <ConnectorCard key={c.id} c={c} conn={conns.find((x) => x.connector === c.id)} reload={() => void load()} openSetup={openSetup} />)}</div>

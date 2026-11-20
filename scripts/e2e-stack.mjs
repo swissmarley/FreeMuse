@@ -26,6 +26,8 @@ const env = {
   SANDBOX_DRIVER: 'local', EGRESS_PROXY_URL: `http://127.0.0.1:${PORTS.egress}`, EGRESS_ALLOW_PRIVATE_HOSTS: '127.0.0.1',
   FIXTURE_PORT: String(PORTS.fixtures), DEMO_DEALS_URL: `http://127.0.0.1:${PORTS.fixtures}/evil`, DEMO_TASK_MINUTES: '1',
   STT_PROVIDER: 'none', TTS_PROVIDER: 'device', NEXT_DIST_DIR: '.next-e2e', LOG_LEVEL: 'warn', NEXT_TELEMETRY_DISABLED: '1',
+  // Not shown in the app. Lets this suite attach the local mailbox the scripted scenarios read.
+  ALLOW_DEMO_CONNECTORS: '1',
 };
 const run = (name, cmd, args) => {
   const p = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });

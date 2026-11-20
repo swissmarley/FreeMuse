@@ -5,7 +5,7 @@ import { makeContext } from './context.js';
 import { performAction } from './gateway.js';
 import type { extractMemories, proactive, reflect } from './memory.js';
 import { type AgentDeps, loadUser } from './runtime.js';
-import { pickConnector } from './tools/types.js';
+import { pickConnector, withDemo } from './tools/types.js';
 
 interface MemFns { extractMemories: typeof extractMemories; reflect: typeof reflect; proactive: typeof proactive }
 
@@ -35,7 +35,7 @@ export async function memoryJob(d: AgentDeps, job: MemoryJob, f: MemFns): Promis
       const u = await loadUser(d, job.userId);
       if (!u) return;
       let upcoming = '';
-      const cal = await pickConnector({ db: d.db, userId: job.userId } as any, ['gcal', 'demo_calendar']);
+      const cal = await pickConnector({ db: d.db, userId: job.userId } as any, withDemo('gcal', 'demo_calendar'));
       if (cal) {
         const ctx = makeContext({ userId: job.userId, thread: 'proactive', conversationId: 'default', taskId: null, turnId: 'proactive', userRequest: 'Check my upcoming events for proactive suggestions', db: d.db, bus: d.bus, llm: d.llm, clients: d.clients, sandbox: d.sandbox });
         upcoming = await performAction(ctx, { actionClass: 'read', connector: cal, operation: 'list_events', payload: { from: new Date().toISOString(), to: new Date(Date.now() + 7 * 86400_000).toISOString() }, title: 'List events' });

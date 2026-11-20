@@ -81,8 +81,8 @@ export default function Onboarding() {
     } catch (er) { setError((er as Error).message); } finally { setBusy(false); }
   };
 
-  /** Finish onboarding, optionally connecting apps in one tap on the way. */
-  const finish = async (connect?: 'demo' | 'google') => {
+  /** Finish onboarding, optionally opening Google consent on the way. */
+  const finish = async (connect?: 'google') => {
     setBusy(true);
     setError('');
     try {
@@ -91,7 +91,6 @@ export default function Onboarding() {
         const r = await api.quickConnect('google');
         if (r.authorizeUrl) { window.location.href = r.authorizeUrl; return; }
       }
-      if (connect === 'demo') await api.quickConnect('demo');
       await refreshMe();
       router.replace('/');
     } catch (er) { setError((er as Error).message); setBusy(false); }
@@ -163,7 +162,6 @@ export default function Onboarding() {
             <h1 style={{ fontSize: '1.3rem', margin: 0 }}>{t.helpEmailCalendar}</h1>
             <p className="muted" style={{ margin: 0 }}>{t.oneTapNote}</p>
             {googleReady && <button className="btn" disabled={busy} onClick={() => void finish('google')}>{t.connectGoogle}</button>}
-            <button className="btn secondary" disabled={busy} onClick={() => void finish('demo')}>{t.tryDemoBtn}</button>
             {!googleReady && <p className="hint" style={{ margin: 0 }}>{t.googleLater}</p>}
             {error && <p role="alert" style={{ color: 'var(--c-danger)', margin: 0 }}>{error}</p>}
             <button className="btn ghost" disabled={busy} onClick={() => void finish()}>{t.skipForNow}</button>

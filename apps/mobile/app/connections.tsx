@@ -12,7 +12,7 @@ import { useTheme } from '../src/theme';
 import { Button, Card, Chip, Field, Screen, Toggle } from '../src/ui';
 
 type GoogleSetup = Awaited<ReturnType<typeof api.googleSetup>>;
-const ICONS: Record<string, string> = { gmail: '✉️', gcal: '📅', gdrive: '📁', demo_mail: '📨', demo_calendar: '🗓️' };
+const ICONS: Record<string, string> = { gmail: '✉️', gcal: '📅', gdrive: '📁' };
 
 function ConnectorCard({ c, conn, reload }: { c: ConnectorInfo; conn?: Connection; reload: () => void }) {
   const th = useTheme();
@@ -32,7 +32,7 @@ function ConnectorCard({ c, conn, reload }: { c: ConnectorInfo; conn?: Connectio
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Text style={{ fontSize: 22 }} accessibilityElementsHidden>{ICONS[c.id] ?? '🔌'}</Text>
         <Text accessibilityRole="header" style={{ fontSize: 17, fontWeight: '800', color: th.text, flex: 1 }}>{c.name}</Text>
-        {conn ? <Chip label={`✓ ${t.connected}`} tone="ok" /> : c.kind === 'demo' ? <Chip label={t.demoData} /> : null}
+        {conn ? <Chip label={`✓ ${t.connected}`} tone="ok" /> : null}
       </View>
       <Text style={{ color: th.textMuted }}>{c.description}{conn?.account ? ` · ${conn.account}` : ''}</Text>
       {!conn && c.available && <Button label={t.connect} disabled={!scopes.length} onPress={() => void save()} />}
@@ -109,10 +109,10 @@ export default function Connections() {
   const missingGoogle = google.filter((g) => !has(g.id));
   const googleAvailable = google.some((g) => g.available);
 
-  const quick = async (preset: 'demo' | 'google') => {
+  const quickGoogle = async () => {
     setBusy(true);
     try {
-      const r = await api.quickConnect(preset, preset === 'google' ? missingGoogle.map((g) => g.id) : undefined);
+      const r = await api.quickConnect('google', missingGoogle.map((g) => g.id));
       if (r.authorizeUrl) await Linking.openURL(r.authorizeUrl);
       void load();
     } catch (e) { Alert.alert(t.connections, (e as Error).message); } finally { setBusy(false); }
@@ -124,15 +124,10 @@ export default function Connections() {
         <Text accessibilityRole="header" style={{ fontSize: 17, fontWeight: '800', color: th.text }}>✉️📅📁 Google</Text>
         <Text style={{ color: th.textMuted }}>{t.googleOneSignIn}</Text>
         {missingGoogle.length === 0 && google.length > 0 ? <Chip label={`✓ ${t.connected}`} tone="ok" />
-          : googleAvailable ? <Button label={busy ? t.openingGoogle : t.connectWithGoogle} disabled={busy} onPress={() => void quick('google')} />
+          : googleAvailable ? <Button label={busy ? t.openingGoogle : t.connectWithGoogle} disabled={busy} onPress={() => void quickGoogle()} />
           : <Button label={showSetup ? t.hideSetupGuide : t.setUpGoogle} kind="secondary" onPress={() => setShowSetup(!showSetup)} />}
       </Card>
       {showSetup && setup && !googleAvailable && <GoogleSetupCard setup={setup} onSaved={() => { setShowSetup(false); void load(); }} />}
-      <Card>
-        <Text accessibilityRole="header" style={{ fontSize: 17, fontWeight: '800', color: th.text }}>🧪 {t.tryDemo}</Text>
-        <Text style={{ color: th.textMuted }}>{t.demoBody}</Text>
-        {has('demo_mail') && has('demo_calendar') ? <Chip label={`✓ ${t.connected}`} tone="ok" /> : <Button kind="secondary" label={t.connectDemo} disabled={busy} onPress={() => void quick('demo')} />}
-      </Card>
       <Text accessibilityRole="header" style={{ fontSize: 18, fontWeight: '800', color: th.text, marginTop: 8 }}>{t.yourApps}</Text>
       {cons.map((c) => <ConnectorCard key={c.id} c={c} conn={conns.find((x) => x.connector === c.id)} reload={() => void load()} />)}
       <Card>
