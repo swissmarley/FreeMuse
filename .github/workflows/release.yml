@@ -68,6 +68,13 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # macOS only remembers the microphone permission for a validly signed app; fail the build if it isn't.
+      - name: Verify macOS signature
+        if: matrix.name == 'macOS'
+        run: |
+          APP="$(find dist -maxdepth 2 -name '*.app' -type d | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'com.apple.security.device.audio-input'
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.name }}

@@ -3,7 +3,7 @@
  * The backend (API, agent, Sentinel, database) runs on your server or with `docker compose up`; this app connects to
  * its web address, remembers it, and gives you microphone access for voice calls, notifications and a dock icon.
  */
-const { app, BrowserWindow, Menu, ipcMain, session, shell, net } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell, net, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -68,12 +68,42 @@ function createWindow() {
   else openSetup();
 }
 
+/**
+ * macOS keeps its own microphone permission per app (System Settings → Privacy & Security → Microphone).
+ * Ask it once through the system API, and if it was turned off, say where to turn it back on instead of failing
+ * silently every time.
+ */
+let micHelpShown = false;
+async function macMicrophoneAccess() {
+  if (process.platform !== 'darwin') return true;
+  const status = systemPreferences.getMediaAccessStatus('microphone');
+  if (status === 'granted') return true;
+  if (status === 'not-determined') return systemPreferences.askForMediaAccess('microphone');
+  if (!micHelpShown) {
+    micHelpShown = true;
+    const opts = {
+      type: 'info',
+      message: 'Free Muse needs access to your microphone',
+      detail: 'Turn on Free Muse in System Settings → Privacy & Security → Microphone, then try again.',
+      buttons: ['Open System Settings', 'Not now'],
+      defaultId: 0,
+      cancelId: 1,
+    };
+    const { response } = await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts));
+    if (response === 0) void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+  }
+  return false;
+}
+
 /** Microphone (voice calls) and notifications only for your Free Muse server. */
 function setupPermissions() {
   const allowed = new Set(['media', 'notifications', 'clipboard-sanitized-write', 'audioCapture']);
   const fromServer = (url) => { try { return !!serverOrigin && new URL(url).origin === serverOrigin; } catch { return false; } };
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
-    cb(allowed.has(permission) && fromServer(details.requestingUrl || wc.getURL()) && (permission !== 'media' || (details.mediaTypes || []).every((m) => m === 'audio')));
+    const ok = allowed.has(permission) && fromServer(details.requestingUrl || wc.getURL()) && (permission !== 'media' || (details.mediaTypes || []).every((m) => m === 'audio'));
+    if (!ok) return cb(false);
+    if (permission === 'media' || permission === 'audioCapture') return void macMicrophoneAccess().then(cb, () => cb(false));
+    cb(true);
   });
   session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => allowed.has(permission) && fromServer(origin));
 }

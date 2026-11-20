@@ -1,25 +1,31 @@
-## Free Muse v0.1.3
+## Free Muse v0.1.4
 
-A fix for the hold-to-talk microphone button on the web, desktop and mobile apps.
+A fix for voice input in the macOS desktop app.
 
 ### Fixed
 
-- **First words no longer cut off.** Recording used to start only after the live-transcription connection opened (up to 4 s). Audio is now captured from the moment the mic opens.
-- **Better accuracy in every language.** The whole recording is transcribed with your language setting; the live stream only provides the preview text while you speak.
-- **The microphone no longer stays on** if you release the button while it is still opening (for example during the permission prompt).
-- **No more stuck or cut-short recordings** when your finger or pointer slides off the button, a scroll gesture starts, or you long-press. The mic level meter also works again.
-- **Failures are no longer silent.** If a recording can't be transcribed you now see a message, on web and mobile. Accidental taps under 250 ms are ignored.
-- **Server:** a malformed message from the speech service can no longer crash the API, and audio or transcription failures return a clear error.
+- **macOS: the microphone permission is now kept.** The Mac app wasn't code-signed, so macOS never stored your "Allow": it kept asking and voice input stayed blocked. The app is now ad-hoc signed with the microphone entitlement.
+- **macOS: clearer help when the microphone is off.** If microphone access is turned off for Free Muse, the app offers to open System Settings → Privacy & Security → Microphone instead of failing silently.
+
+### Upgrading on macOS
+
+Clear the old permission entry once, then allow the microphone when asked:
+
+```bash
+tccutil reset Microphone local.personal.freemuse
+```
+
+The app is ad-hoc signed (not with an Apple Developer ID), so macOS asks again once after each update.
 
 ### Downloads
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS (Intel + Apple Silicon) | `FreeMuse-0.1.3-mac-universal.dmg` | Not notarised: the first time, right-click the app → **Open**, or run `xattr -cr "/Applications/Free Muse.app"`. |
-| Windows 10/11 | `FreeMuse-0.1.3-win-x64.exe` (installer), `-arm64.exe`, `FreeMuse-0.1.3-win-portable.exe` | Not code-signed: SmartScreen may warn, choose **More info → Run anyway**. |
+| macOS (Intel + Apple Silicon) | `FreeMuse-0.1.4-mac-universal.dmg` | Not notarised: the first time, right-click the app → **Open**, or run `xattr -cr "/Applications/Free Muse.app"`. |
+| Windows 10/11 | `FreeMuse-0.1.4-win-x64.exe` (installer), `-arm64.exe`, `FreeMuse-0.1.4-win-portable.exe` | Not code-signed: SmartScreen may warn, choose **More info → Run anyway**. |
 | Linux | `.AppImage` (x64, arm64), `.deb` (x64, arm64), `.tar.gz` | AppImage: `chmod +x` and run. |
-| Android 8+ | `FreeMuse-0.1.3-android.apk` | Allow "install unknown apps" for your browser or file manager. |
-| iOS / iPadOS | `FreeMuse-0.1.3-ios-unsigned.ipa` | Unsigned: install with AltStore or Sideloadly (they sign it with your Apple ID), or re-sign it with your developer account. |
+| Android 8+ | `FreeMuse-0.1.4-android.apk` | Allow "install unknown apps" for your browser or file manager. |
+| iOS / iPadOS | `FreeMuse-0.1.4-ios-unsigned.ipa` | Unsigned: install with AltStore or Sideloadly (they sign it with your Apple ID), or re-sign it with your developer account. |
 
 `SHA256SUMS.txt` lists checksums for every file.
 
